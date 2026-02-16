@@ -5,28 +5,42 @@ import { Platform } from 'react-native';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
-console.log('Supabase Initialization:', {
-    hasUrl: !!supabaseUrl,
-    urlPrefix: supabaseUrl.substring(0, 10),
-    hasKey: !!supabaseAnonKey,
-    keyLength: supabaseAnonKey.length
-});
-
-// Custom storage to handle SSR (Static Site Generation)
-const isWeb = Platform.OS === 'web';
-const isServer = isWeb && typeof window === 'undefined';
-
-const storage = isServer ? {
-    getItem: () => Promise.resolve(null),
-    setItem: () => Promise.resolve(),
-    removeItem: () => Promise.resolve(),
-} : AsyncStorage;
+// Custom storage to handle Web, Mobile, and Node (Build-time)
+const customStorage = {
+    getItem: (key: string) => {
+        if (Platform.OS === 'web') {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                return window.localStorage.getItem(key);
+            }
+            return null; // Fallback during Node build
+        }
+        return AsyncStorage.getItem(key);
+    },
+    setItem: (key: string, value: string) => {
+        if (Platform.OS === 'web') {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                window.localStorage.setItem(key, value);
+            }
+            return;
+        }
+        return AsyncStorage.setItem(key, value);
+    },
+    removeItem: (key: string) => {
+        if (Platform.OS === 'web') {
+            if (typeof window !== 'undefined' && window.localStorage) {
+                window.localStorage.removeItem(key);
+            }
+            return;
+        }
+        return AsyncStorage.removeItem(key);
+    },
+};
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
-        storage: storage as any,
+        storage: customStorage as any,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: isWeb,
+        detectSessionInUrl: Platform.OS === 'web',
     },
 });

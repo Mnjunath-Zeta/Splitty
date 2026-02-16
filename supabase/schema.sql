@@ -67,7 +67,8 @@ create table expenses (
     id uuid default gen_random_uuid() primary key,
     description text not null,
     amount numeric not null,
-    payer_id uuid references profiles(id) not null,
+    payer_id uuid references profiles(id), -- Nullable for local friends
+    payer_name text, -- Name of local payer if payer_id is null
     group_id uuid references groups(id), -- Nullable for personal expenses
     date timestamp with time zone default timezone('utc'::text, now()) not null,
     category text default 'general',
@@ -83,41 +84,82 @@ alter table expenses enable row level security;
 -- For strict integrity, separate table is better, but JSONB is flexible for MVP. Let's stick with JSONB or array for participants for now.)
 -- Actually, let's keep it simple.
 
+-- Helper Function to break RLS recursion
+create or replace function public.is_group_member(gid uuid, uid uuid)
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.group_members 
+    where group_id = gid and user_id = uid
+  );
+end;
+$$ language plpgsql security definer;
+
 -- Policies for Groups
 create policy "Groups are viewable by members." on groups
-  for select using (
-    auth.uid() in (
-      select user_id from group_members where group_id = id
-    )
-  );
+  for select using (is_group_member(id, auth.uid()));
 
 create policy "Users can create groups." on groups
   for insert with check (auth.uid() = created_by);
 
+create policy "Users can update their groups." on groups
+  for update using (auth.uid() = created_by);
+
+create policy "Users can delete their groups." on groups
+  for delete using (auth.uid() = created_by);
+
 -- Policies for Group Members
 create policy "Members are viewable by group members." on group_members
-  for select using (
-    exists (
-      select 1 from group_members gm 
-      where gm.group_id = group_members.group_id 
-      and gm.user_id = auth.uid()
-    )
-  );
+  for select using (is_group_member(group_id, auth.uid()));
   
- create policy "Users can join groups." on group_members
-  for insert with check (auth.uid() = user_id); -- Only self-join for now? Or invite logic later.
+create policy "Users can join groups." on group_members
+  for insert with check (auth.uid() = user_id);
+
+create policy "Users can leave groups." on group_members
+  for delete using (auth.uid() = user_id);
 
 -- Policies for Expenses
-create policy "Expenses provided by user or in user's groups are viewable." on expenses
+create policy "Expenses are viewable by participants." on expenses
   for select using (
     auth.uid() = created_by or 
     auth.uid() = payer_id or
-    (group_id is not null and exists (
-      select 1 from group_members gm 
-      where gm.group_id = expenses.group_id 
-      and gm.user_id = auth.uid()
-    ))
+    (group_id is not null and is_group_member(group_id, auth.uid()))
   );
 
 create policy "Users can create expenses." on expenses
   for insert with check (auth.uid() = created_by);
+
+create policy "Users can update their expenses." on expenses
+  for update using (auth.uid() = created_by);
+
+create policy "Users can delete their expenses." on expenses
+  for delete using (auth.uid() = created_by);
+
+-- Create Friends Table
+create table friends (
+    id uuid default gen_random_uuid() primary key,
+    name text not null,
+    user_id uuid references profiles(id) on delete cascade not null,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table friends enable row level security;
+
+create policy "Users can view their own friends." on friends
+    for select using (auth.uid() = user_id);
+
+create policy "Users can add their own friends." on friends
+    for insert with check (auth.uid() = user_id);
+
+create policy "Users can delete their own friends." on friends
+    for delete using (auth.uid() = user_id);
+
+-- Enable Real-time for all tables
+alter publication supabase_realtime add table expenses;
+alter publication supabase_realtime add table friends;
+alter publication supabase_realtime add table groups;
+
+-- Set replica identity to FULL for better deletion handling
+alter table expenses replica identity full;
+alter table friends replica identity full;
+alter table groups replica identity full;

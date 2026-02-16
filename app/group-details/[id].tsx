@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../../store/useSplittyStore';
-import { LightColors, DarkColors } from '../../constants/Colors';
+import { Themes, ThemeName, Colors } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { ArrowLeft, Users, Receipt, Banknote, Trash2 } from 'lucide-react-native';
 import { getCategoryById } from '../../constants/Categories';
@@ -10,9 +10,8 @@ import { getCategoryById } from '../../constants/Categories';
 export default function GroupDetailsScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const { groups, expenses, friends, isDarkMode, formatCurrency, deleteExpense } = useSplittyStore();
-
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { groups, expenses, friends, appearance, colors, formatCurrency, deleteExpense } = useSplittyStore();
+    const isDark = appearance === 'dark';
 
     const group = groups.find(g => g.id === id);
     // Filter expenses belonging to this group
@@ -81,7 +80,7 @@ export default function GroupDetailsScreen() {
             <ScrollView contentContainerStyle={styles.container}>
                 {/* Group Summary Card */}
                 <GlassCard style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.groupIcon, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
+                    <View style={[styles.groupIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
                         <Users size={32} color={colors.primary} />
                     </View>
                     <Text style={[styles.groupName, { color: colors.text }]}>{group.name}</Text>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { TextInput, StyleSheet, View, Text, TextInputProps, TextStyle, StyleProp, ViewStyle } from 'react-native';
-import { Colors } from '../constants/Colors';
+import { Themes, ThemeName } from '../constants/Colors';
+import { useSplittyStore } from '../store/useSplittyStore';
 
 interface StyledInputProps extends TextInputProps {
     label?: string;
@@ -9,12 +10,18 @@ interface StyledInputProps extends TextInputProps {
 }
 
 export const StyledInput: React.FC<StyledInputProps> = ({ label, style, labelStyle, containerStyle, ...props }) => {
+    const colors = useSplittyStore(state => state.colors);
+
     return (
         <View style={[styles.container, containerStyle]}>
-            {label && <Text style={[styles.label, labelStyle]}>{label}</Text>}
+            {label && <Text style={[styles.label, { color: colors.text }, labelStyle]}>{label}</Text>}
             <TextInput
-                style={[styles.input, style]}
-                placeholderTextColor={Colors.textSecondary}
+                style={[styles.input, {
+                    backgroundColor: colors.inputBackground,
+                    color: colors.text,
+                    borderColor: colors.border
+                }, style]}
+                placeholderTextColor={colors.textSecondary}
                 {...props}
             />
         </View>
@@ -27,19 +34,15 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     label: {
-        color: Colors.text,
         fontSize: 14,
         fontWeight: '600',
         marginBottom: 8,
         marginLeft: 4,
     },
     input: {
-        backgroundColor: '#F1F5F9', // Slate 100
         borderRadius: 12,
         padding: 16,
-        color: Colors.text,
         fontSize: 16,
         borderWidth: 1,
-        borderColor: Colors.border,
     },
 });

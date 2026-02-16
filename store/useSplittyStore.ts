@@ -3,6 +3,9 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { ThemeName, AppearanceMode, AccentName, getThemeColors, ThemeColors } from '../constants/Colors';
+import { notificationService } from '../lib/NotificationService';
+import * as Crypto from 'expo-crypto';
 
 export interface Friend {
     id: string;
@@ -77,8 +80,15 @@ interface SplittyState {
     userProfile: UserProfile;
     updateUserProfile: (profile: Partial<UserProfile>) => void;
     clearData: () => void;
+    theme: ThemeName; // Deprecated: use accent instead
+    setTheme: (theme: ThemeName) => void;
+    appearance: AppearanceMode;
+    setAppearance: (mode: AppearanceMode) => void;
+    accent: AccentName;
+    setAccent: (accent: AccentName) => void;
     isDarkMode: boolean;
-    toggleTheme: () => void;
+    toggleTheme: () => void; // Now toggles appearance
+    colors: ThemeColors; // Helper to get merged colors directly from store
     currency: string;
     setCurrency: (currency: string) => void;
     getCurrencySymbol: () => string;
@@ -86,6 +96,10 @@ interface SplittyState {
     settleUp: (payerId: string, receiverId: string, amount: number) => void;
     signOut: () => Promise<void>;
     subscribeToChanges: () => () => void;
+    // Notifications
+    notificationsEnabled: boolean;
+    setNotificationsEnabled: (enabled: boolean) => void;
+    initNotifications: () => Promise<void>;
 }
 
 export const useSplittyStore = create<SplittyState>()(
@@ -94,8 +108,12 @@ export const useSplittyStore = create<SplittyState>()(
             session: null,
             setSession: (session) => set({ session }),
             fetchData: async () => {
+                console.log('🚀 fetchData started...');
                 const { session } = get();
-                if (!session?.user) return;
+                if (!session?.user) {
+                    console.log('⚠️ No session found in fetchData');
+                    return;
+                }
 
                 const userId = session.user.id;
 
@@ -126,6 +144,21 @@ export const useSplittyStore = create<SplittyState>()(
                             phone: profileData.phone || ''
                         }
                     });
+                }
+
+                // Fetch Friends
+                const { data: friendsData, error: friendsError } = await supabase
+                    .from('friends')
+                    .select('*')
+                    .order('name');
+
+                if (!friendsError && friendsData) {
+                    const mappedFriends: Friend[] = friendsData.map((f: any) => ({
+                        id: f.id,
+                        name: f.name,
+                        balance: 0 // Will be recalculated by expenses loader
+                    }));
+                    set({ friends: mappedFriends });
                 }
 
                 // Fetch Groups
@@ -166,7 +199,10 @@ export const useSplittyStore = create<SplittyState>()(
                         category: e.category,
                         isSettlement: false // Logic needed
                     }));
+                    console.log(`✅ fetchData complete. Loaded ${mappedExpenses.length} expenses.`);
                     set({ expenses: mappedExpenses });
+                } else if (expensesError) {
+                    console.error('❌ fetchData expenses error:', expensesError);
                 }
             },
             friends: [
@@ -184,24 +220,41 @@ export const useSplittyStore = create<SplittyState>()(
             updateUserProfile: (profile) => set((state) => ({
                 userProfile: { ...state.userProfile, ...profile }
             })),
-            addFriend: (name: string) => set((state) => ({
-                friends: [...state.friends, { id: Math.random().toString(36).substr(2, 9), name, balance: 0 }]
-            })),
+            addFriend: (name: string) => {
+                const newFriend = { id: Crypto.randomUUID(), name, balance: 0 };
+                set((state) => ({
+                    friends: [...state.friends, newFriend]
+                }));
+
+                const { session } = get();
+                if (session?.user) {
+                    supabase.from('friends').insert({
+                        id: newFriend.id,
+                        name: newFriend.name,
+                        user_id: session.user.id
+                    }).then(({ error }) => {
+                        if (error) console.error("Friend sync error:", error);
+                    });
+                }
+            },
             addGroup: (name, members) => {
                 set((state) => ({
-                    groups: [...state.groups, { id: Math.random().toString(36).substr(2, 9), name, members, balance: 0 }]
+                    groups: [...state.groups, { id: Crypto.randomUUID(), name, members, balance: 0 }]
                 }));
                 const { session } = get();
                 if (session?.user) {
+                    const groupId = Crypto.randomUUID();
                     supabase.from('groups').insert({
+                        id: groupId,
                         name,
                         created_by: session.user.id
-                    }).select().single().then(({ data, error }) => {
-                        if (data) {
-                            supabase.from('group_members').insert({
-                                group_id: data.id,
-                                user_id: session.user.id
-                            }).then();
+                    }).then(({ error }) => {
+                        if (!error) {
+                            const memberInserts = [
+                                { group_id: groupId, user_id: session.user.id },
+                                ...members.filter(mId => mId !== 'self' && mId.length > 10).map(mId => ({ group_id: groupId, user_id: mId }))
+                            ];
+                            supabase.from('group_members').insert(memberInserts).then();
                         }
                     });
                 }
@@ -214,31 +267,59 @@ export const useSplittyStore = create<SplittyState>()(
                 session: null,
                 userProfile: { name: 'Guest', email: '' }
             })),
+            theme: 'light',
+            appearance: 'light',
+            accent: 'classic',
+            colors: getThemeColors('light', 'classic'),
+            setTheme: (theme: ThemeName) => {
+                let app: AppearanceMode = 'dark';
+                let acc: AccentName = 'classic';
+                if (theme === 'light') {
+                    app = 'light';
+                } else if (theme === 'midnight') {
+                    acc = 'midnight';
+                } else if (theme === 'sunset') {
+                    acc = 'sunset';
+                } else if (theme === 'forest') {
+                    acc = 'forest';
+                }
+                set({
+                    theme,
+                    appearance: app,
+                    accent: acc,
+                    isDarkMode: app === 'dark',
+                    colors: getThemeColors(app, acc)
+                });
+            },
+            setAppearance: (appearance: AppearanceMode) => set((state) => ({
+                appearance,
+                isDarkMode: appearance === 'dark',
+                colors: getThemeColors(appearance, state.accent)
+            })),
+            setAccent: (accent: AccentName) => set((state) => ({
+                accent,
+                colors: getThemeColors(state.appearance, accent)
+            })),
             isDarkMode: false,
-            toggleTheme: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
+            notificationsEnabled: true,
+            setNotificationsEnabled: (enabled: boolean) => set({ notificationsEnabled: enabled }),
+            initNotifications: async () => {
+                const token = await notificationService.registerForPushNotificationsAsync();
+                if (token) {
+                    console.log('Push Data: Local Notifications Ready');
+                }
+            },
+            toggleTheme: () => set((state) => {
+                const nextMode: AppearanceMode = state.appearance === 'light' ? 'dark' : 'light';
+                return {
+                    appearance: nextMode,
+                    isDarkMode: nextMode === 'dark',
+                    colors: getThemeColors(nextMode, state.accent)
+                };
+            }),
             signOut: async () => {
                 await supabase.auth.signOut();
                 get().clearData();
-            },
-            subscribeToChanges: () => {
-                const channel = supabase
-                    .channel('schema-db-changes')
-                    .on(
-                        'postgres_changes',
-                        {
-                            event: '*',
-                            schema: 'public',
-                        },
-                        (payload) => {
-                            console.log('Change received!', payload);
-                            get().fetchData();
-                        }
-                    )
-                    .subscribe();
-
-                return () => {
-                    supabase.removeChannel(channel);
-                };
             },
             currency: 'USD',
             setCurrency: (currency) => set(() => ({ currency })),
@@ -286,21 +367,27 @@ export const useSplittyStore = create<SplittyState>()(
                 });
             },
             addExpense: (expense) => {
+                console.log('➕ addExpense called', expense.description);
                 set((state) => {
                     const newExpense = {
                         ...expense,
-                        id: Math.random().toString(36).substr(2, 9),
+                        id: Crypto.randomUUID(),
                         date: new Date().toISOString(),
                         splitType: expense.splitType || 'equal',
                         splitDetails: expense.splitDetails || {}
                     };
 
-                    const { session } = get();
+                    const { session, friends, userProfile } = get();
                     if (session?.user) {
+                        const payer = friends.find(f => f.id === expense.payerId);
+                        const payerName = expense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
+
                         supabase.from('expenses').insert({
+                            id: newExpense.id,
                             description: newExpense.description,
                             amount: newExpense.amount,
-                            payer_id: expense.payerId === 'self' ? session.user.id : expense.payerId, // If friend paid, this might fail RLS if not careful, but sticking to self for now
+                            payer_id: expense.payerId === 'self' ? session.user.id : null,
+                            payer_name: payerName,
                             group_id: newExpense.groupId,
                             date: newExpense.date,
                             category: newExpense.category,
@@ -308,7 +395,15 @@ export const useSplittyStore = create<SplittyState>()(
                             split_details: newExpense.splitDetails,
                             created_by: session.user.id
                         }).then(({ error }) => {
-                            if (error) console.log("Expense sync error", error);
+                            if (error) {
+                                console.error("Expense sync error details:", error);
+                                console.log("Attempted payload:", {
+                                    description: newExpense.description,
+                                    amount: newExpense.amount,
+                                    payer_id: expense.payerId === 'self' ? session.user.id : null,
+                                    payer_name: payerName
+                                });
+                            }
                         });
                     }
 
@@ -390,6 +485,7 @@ export const useSplittyStore = create<SplittyState>()(
             },
             deleteExpense: (id) => {
                 set((state) => {
+                    const { session } = get();
                     const expense = state.expenses.find(e => e.id === id);
                     if (!expense) return state;
 
@@ -456,6 +552,12 @@ export const useSplittyStore = create<SplittyState>()(
                         }
                     }
 
+                    if (session?.user) {
+                        supabase.from('expenses').delete().eq('id', id).then(({ error }) => {
+                            if (error) console.error("Error deleting expense:", error);
+                        });
+                    }
+
                     return {
                         expenses: state.expenses.filter(e => e.id !== id),
                         friends: updatedFriends,
@@ -464,9 +566,45 @@ export const useSplittyStore = create<SplittyState>()(
                 });
             },
             editExpense: (id, updatedExpense) => {
-                const state = get();
-                state.deleteExpense(id);
-                state.addExpense(updatedExpense);
+                console.log('📝 editExpense called', id, updatedExpense.description);
+                set((state) => {
+                    const { session, friends, userProfile, fetchData } = get();
+                    const oldExpense = state.expenses.find(e => e.id === id);
+                    if (!oldExpense) return state;
+
+                    const newExpenseFull = {
+                        ...updatedExpense,
+                        id,
+                        date: oldExpense.date,
+                        splitType: updatedExpense.splitType || 'equal',
+                        splitDetails: updatedExpense.splitDetails || {}
+                    };
+
+                    if (session?.user) {
+                        const payer = friends.find(f => f.id === updatedExpense.payerId);
+                        const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
+
+                        supabase.from('expenses').update({
+                            description: newExpenseFull.description,
+                            amount: newExpenseFull.amount,
+                            payer_id: updatedExpense.payerId === 'self' ? session.user.id : null,
+                            payer_name: payerName,
+                            group_id: newExpenseFull.groupId,
+                            category: newExpenseFull.category,
+                            split_type: newExpenseFull.splitType,
+                            split_details: newExpenseFull.splitDetails
+                        })
+                            .eq('id', id)
+                            .then(({ error }) => {
+                                if (error) console.error("Expense edit sync error:", error);
+                                fetchData(); // Refresh everything to ensure balances are correct
+                            });
+                    }
+
+                    return {
+                        expenses: state.expenses.map(e => e.id === id ? newExpenseFull : e)
+                    };
+                });
             },
             recurringExpenses: [],
             addRecurringExpense: (expense) => set((state) => {
@@ -479,7 +617,7 @@ export const useSplittyStore = create<SplittyState>()(
                 return {
                     recurringExpenses: [...state.recurringExpenses, {
                         ...expense,
-                        id: Math.random().toString(36).substr(2, 9),
+                        id: Crypto.randomUUID(),
                         nextDueDate: nextDue.toISOString(),
                         active: true
                     }]
@@ -526,17 +664,128 @@ export const useSplittyStore = create<SplittyState>()(
                 }
                 return count;
             },
-            deleteFriend: (id) => set((state) => ({
-                friends: state.friends.filter(f => f.id !== id)
-            })),
-            deleteGroup: (id) => set((state) => ({
-                groups: state.groups.filter(g => g.id !== id)
-            })),
-            editGroup: (id, name, members) => set((state) => ({
-                groups: state.groups.map(g =>
-                    g.id === id ? { ...g, name, members } : g
-                )
-            })),
+            deleteFriend: (id) => {
+                set((state) => ({
+                    friends: state.friends.filter(f => f.id !== id)
+                }));
+                const { session } = get();
+                if (session?.user) {
+                    supabase.from('friends').delete().eq('id', id).then(({ error }) => {
+                        if (error) console.error("Error deleting friend:", error);
+                    });
+                }
+            },
+            deleteGroup: (id) => {
+                set((state) => ({
+                    groups: state.groups.filter(g => g.id !== id)
+                }));
+                const { session } = get();
+                if (session?.user) {
+                    supabase.from('groups').delete().eq('id', id).then(({ error }) => {
+                        if (error) console.error("Error deleting group:", error);
+                    });
+                }
+            },
+            editGroup: (id, name, members) => {
+                set((state) => ({
+                    groups: state.groups.map(g =>
+                        g.id === id ? { ...g, name, members } : g
+                    )
+                }));
+                const { session } = get();
+                if (session?.user) {
+                    // Update name
+                    supabase.from('groups').update({ name }).eq('id', id).then(({ error }) => {
+                        if (error) console.error("Error updating group:", error);
+                    });
+
+                    // Update members (Clear and re-add for simplicity in MVP)
+                    supabase.from('group_members').delete().eq('group_id', id).then(() => {
+                        const memberInserts = [
+                            { group_id: id, user_id: session.user.id }, // Always include self
+                            ...members.filter(mId => mId !== 'self').map(mId => ({ group_id: id, user_id: mId }))
+                        ];
+                        // Filtering out 'self' and mapping to actual UUIDs. 
+                        // Note: If friend is local, we might need a separate way to track group members 
+                        // but the current schema uses profiles(id). For now, syncing what we can.
+                        supabase.from('group_members').insert(memberInserts).then();
+                    });
+                }
+            },
+            subscribeToChanges: () => {
+                const { session, notificationsEnabled, fetchData, formatCurrency } = get();
+                if (!session?.user) return () => { };
+
+                const channel = supabase
+                    .channel('realtime-updates')
+                    .on(
+                        'postgres_changes',
+                        {
+                            event: '*',
+                            schema: 'public',
+                            table: 'expenses',
+                        },
+                        (payload) => {
+                            const eventData = payload.new as any || payload.old as any;
+                            console.log('🔔 Real-time Expense Event:', payload.eventType, eventData?.id);
+
+                            if (payload.eventType === 'INSERT') {
+                                const newExp = payload.new as any;
+                                if (newExp.created_by !== session.user.id && notificationsEnabled) {
+                                    const payer = get().friends.find(f => f.id === newExp.payer_id);
+                                    const payerName = newExp.payer_name || (newExp.payer_id === session.user.id ? 'You' : (payer?.name || 'Someone'));
+                                    notificationService.notifyNewExpense(payerName, newExp.description, newExp.amount.toString(), 'calculating...');
+                                }
+                            }
+
+                            if (payload.eventType === 'DELETE') {
+                                const deletedId = (payload.old as any)?.id;
+                                if (deletedId) {
+                                    console.log('🗑️ Local removal of deleted expense:', deletedId);
+                                    set((state) => ({
+                                        expenses: state.expenses.filter(e => e.id !== deletedId)
+                                    }));
+                                }
+                            }
+
+                            // Always refresh for any external change or DELETE
+                            if (payload.eventType === 'DELETE' || (payload.new as any)?.created_by !== session.user.id) {
+                                console.log('🔄 Triggering fetchData due to event...');
+                                fetchData();
+                            }
+                        }
+                    )
+                    .on(
+                        'postgres_changes',
+                        {
+                            event: '*',
+                            schema: 'public',
+                            table: 'friends',
+                        },
+                        (payload) => {
+                            const eventData = payload.new as any || payload.old as any;
+                            console.log('🔔 Real-time Friend change:', payload.eventType, eventData?.id);
+
+                            if (payload.eventType === 'DELETE') {
+                                const deletedId = (payload.old as any)?.id;
+                                if (deletedId) {
+                                    console.log('🗑️ Local removal of deleted friend:', deletedId);
+                                    set((state) => ({
+                                        friends: state.friends.filter(f => f.id !== deletedId)
+                                    }));
+                                }
+                            }
+                            fetchData();
+                        }
+                    )
+                    .subscribe((status) => {
+                        console.log('📡 Real-time Subscription Status:', status);
+                    });
+
+                return () => {
+                    supabase.removeChannel(channel);
+                };
+            },
         }),
         {
             name: 'splitty-storage',

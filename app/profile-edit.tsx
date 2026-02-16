@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, SafeAreaVi
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useSplittyStore } from '../store/useSplittyStore';
-import { LightColors, DarkColors } from '../constants/Colors';
+import { Themes, ThemeName, Colors } from '../constants/Colors';
 import { GlassCard } from '../components/GlassCard';
 import { StyledInput } from '../components/StyledInput';
 import { VibrantButton } from '../components/VibrantButton';
@@ -11,8 +11,8 @@ import { ArrowLeft, User, Mail, Phone } from 'lucide-react-native';
 
 export default function ProfileEditScreen() {
     const router = useRouter();
-    const { userProfile, updateUserProfile, isDarkMode } = useSplittyStore();
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { userProfile, updateUserProfile, appearance, colors } = useSplittyStore();
+    const isDark = appearance === 'dark';
 
     const [name, setName] = useState(userProfile.name);
     const [email, setEmail] = useState(userProfile.email);
@@ -55,7 +55,7 @@ export default function ProfileEditScreen() {
             <ScrollView contentContainerStyle={styles.container}>
                 <View style={styles.avatarSection}>
                     <TouchableOpacity onPress={pickImage} activeOpacity={0.8}>
-                        <View style={[styles.avatar, { backgroundColor: isDarkMode ? 'rgba(129, 140, 248, 0.2)' : 'rgba(99, 102, 241, 0.1)', overflow: 'hidden' }]}>
+                        <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(129, 140, 248, 0.2)' : 'rgba(99, 102, 241, 0.1)', overflow: 'hidden' }]}>
                             {avatar ? (
                                 <Image source={{ uri: avatar }} style={{ width: '100%', height: '100%' }} />
                             ) : (

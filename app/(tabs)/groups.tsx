@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LightColors, DarkColors } from '../../constants/Colors';
+import { Themes, ThemeName, Colors } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { StyledInput } from '../../components/StyledInput';
 import { VibrantButton } from '../../components/VibrantButton';
@@ -10,13 +10,13 @@ import { Users, Plus, Pencil, Trash2 } from 'lucide-react-native';
 
 export default function GroupsScreen() {
     const router = useRouter();
-    const { groups, friends, addGroup, editGroup, deleteGroup, isDarkMode, formatCurrency } = useSplittyStore();
+    const { groups, friends, addGroup, editGroup, deleteGroup, appearance, colors, formatCurrency } = useSplittyStore();
     const [groupName, setGroupName] = useState('');
     const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
     const [showAdd, setShowAdd] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
 
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const isDark = appearance === 'dark';
 
     const handleSaveGroup = () => {
         if (groupName.trim() && selectedMembers.length > 0) {
@@ -144,7 +144,7 @@ export default function GroupsScreen() {
                                 activeOpacity={0.8}
                             >
                                 <GlassCard style={[styles.groupCard, { backgroundColor: colors.surface }]}>
-                                    <View style={[styles.groupIcon, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
+                                    <View style={[styles.groupIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
                                         <Users color={colors.textSecondary} size={24} />
                                     </View>
                                     <View style={styles.groupInfo}>

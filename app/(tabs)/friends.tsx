@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LightColors, DarkColors } from '../../constants/Colors';
+import { Themes, ThemeName, Colors } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { StyledInput } from '../../components/StyledInput';
 import { VibrantButton } from '../../components/VibrantButton';
@@ -10,10 +10,9 @@ import { UserPlus, User, Trash2, Banknote } from 'lucide-react-native';
 
 export default function FriendsScreen() {
     const router = useRouter();
-    const { friends, addFriend, deleteFriend, isDarkMode, formatCurrency, settleUp } = useSplittyStore();
+    const { friends, addFriend, deleteFriend, appearance, colors, formatCurrency, settleUp } = useSplittyStore();
     const [newName, setNewName] = useState('');
-
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const isDark = appearance === 'dark';
 
     const handleAddFriend = () => {
         if (newName.trim()) {
@@ -104,7 +103,7 @@ export default function FriendsScreen() {
                                 onPress={() => router.push({ pathname: '/friend-details/[id]', params: { id: item.id } })}
                             >
                                 <GlassCard style={[styles.friendCard, { backgroundColor: colors.surface }]}>
-                                    <View style={[styles.avatar, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
+                                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
                                         <User color={colors.textSecondary} size={24} />
                                     </View>
                                     <View style={styles.friendInfo}>

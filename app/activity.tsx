@@ -2,17 +2,16 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, TextInput } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../store/useSplittyStore';
-import { LightColors, DarkColors } from '../constants/Colors';
+import { Themes, ThemeName, Colors } from '../constants/Colors';
 import { GlassCard } from '../components/GlassCard';
 import { ArrowLeft, Search, Trash2, Banknote, Users } from 'lucide-react-native';
 import { getCategoryById } from '../constants/Categories';
 
 export default function ActivityScreen() {
     const router = useRouter();
-    const { expenses, friends, groups, isDarkMode, formatCurrency, deleteExpense } = useSplittyStore();
+    const { expenses, friends, groups, appearance, colors, formatCurrency, deleteExpense } = useSplittyStore();
     const [searchQuery, setSearchQuery] = useState('');
-
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const isDark = appearance === 'dark';
 
     // Filter and Sort Expenses
     const getFilteredExpenses = () => {

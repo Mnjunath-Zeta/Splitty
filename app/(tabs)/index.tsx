@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
-import { LightColors, DarkColors } from '../../constants/Colors';
+import { Themes, ThemeName } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { VibrantButton } from '../../components/VibrantButton';
 import { useRouter } from 'expo-router';
@@ -9,9 +9,8 @@ import { getCategoryById } from '../../constants/Categories';
 
 export default function DashboardScreen() {
     const router = useRouter();
-    const { friends, expenses, deleteExpense, isDarkMode, formatCurrency } = useSplittyStore();
-
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { friends, expenses, deleteExpense, appearance, colors, formatCurrency } = useSplittyStore();
+    const isDark = appearance === 'dark';
 
     const owed = friends.reduce((acc, f) => f.balance > 0 ? acc + f.balance : acc, 0);
     const owe = friends.reduce((acc, f) => f.balance < 0 ? acc + Math.abs(f.balance) : acc, 0);

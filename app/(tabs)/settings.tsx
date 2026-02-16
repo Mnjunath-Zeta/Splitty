@@ -1,17 +1,36 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, Alert, SafeAreaView, Image } from 'react-native';
-import { LightColors, DarkColors } from '../../constants/Colors';
+import { AccentPalettes, AccentName, AppearanceMode } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { useSplittyStore } from '../../store/useSplittyStore';
-import { User, Bell, Moon, Trash2, LogOut, Info, ChevronRight, CreditCard, DollarSign } from 'lucide-react-native';
+import { User, Bell, Trash2, LogOut, ChevronRight, CreditCard, DollarSign } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
 export default function SettingsScreen() {
-    const { clearData, isDarkMode, toggleTheme, currency, setCurrency, userProfile, signOut } = useSplittyStore();
-    const [notifications, setNotifications] = useState(true);
+    const {
+        clearData,
+        appearance,
+        setAppearance,
+        accent,
+        setAccent,
+        colors,
+        currency,
+        setCurrency,
+        userProfile,
+        notificationsEnabled,
+        setNotificationsEnabled,
+        signOut
+    } = useSplittyStore();
     const router = useRouter();
 
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const isDark = appearance === 'dark';
+
+    const accentOptions: { name: AccentName; label: string; preview: string }[] = [
+        { name: 'classic', label: 'Classic', preview: AccentPalettes.classic.primary },
+        { name: 'midnight', label: 'Midnight', preview: AccentPalettes.midnight.primary },
+        { name: 'sunset', label: 'Sunset', preview: AccentPalettes.sunset.primary },
+        { name: 'forest', label: 'Forest', preview: AccentPalettes.forest.primary },
+    ];
 
     const handleCurrencyChange = () => {
         Alert.alert(
@@ -73,7 +92,7 @@ export default function SettingsScreen() {
                 <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Profile</Text>
                     <GlassCard style={[styles.profileCard, { backgroundColor: colors.surface }]}>
-                        <View style={[styles.avatar, { backgroundColor: isDarkMode ? 'rgba(129, 140, 248, 0.2)' : 'rgba(99, 102, 241, 0.1)', overflow: 'hidden' }]}>
+                        <View style={[styles.avatar, { backgroundColor: colors.primary + '20', overflow: 'hidden' }]}>
                             {userProfile.avatar ? (
                                 <Image source={{ uri: userProfile.avatar }} style={{ width: '100%', height: '100%' }} />
                             ) : (
@@ -94,18 +113,44 @@ export default function SettingsScreen() {
                 </View>
 
                 <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>General</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Appearance</Text>
                     <GlassCard style={[styles.settingsCard, { backgroundColor: colors.surface }]}>
                         {renderSettingItem(
-                            <Moon size={20} color={colors.textSecondary} />,
+                            <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: colors.text }} />,
                             "Dark Mode",
                             <Switch
-                                value={isDarkMode}
-                                onValueChange={toggleTheme}
+                                value={isDark}
+                                onValueChange={(val) => setAppearance(val ? 'dark' : 'light')}
                                 trackColor={{ false: colors.border, true: colors.primary }}
                                 thumbColor={'white'}
                             />
                         )}
+                    </GlassCard>
+                </View>
+
+                <View style={styles.section}>
+                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Accent Theme</Text>
+                    <View style={styles.themeGrid}>
+                        {accentOptions.map((opt) => (
+                            <TouchableOpacity
+                                key={opt.name}
+                                style={[
+                                    styles.themeOption,
+                                    { borderColor: accent === opt.name ? colors.primary : colors.border },
+                                    accent === opt.name && { backgroundColor: colors.primary + '10' }
+                                ]}
+                                onPress={() => setAccent(opt.name)}
+                            >
+                                <View style={[styles.themePreview, { backgroundColor: opt.preview }]} />
+                                <Text style={[styles.themeLabel, { color: accent === opt.name ? colors.primary : colors.text }]}>{opt.label}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+
+                <View style={styles.section}>
+                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>General</Text>
+                    <GlassCard style={[styles.settingsCard, { backgroundColor: colors.surface }]}>
                         <View style={[styles.separator, { backgroundColor: colors.border }]} />
                         {renderSettingItem(
                             <DollarSign size={20} color={colors.textSecondary} />,
@@ -121,8 +166,8 @@ export default function SettingsScreen() {
                             <Bell size={20} color={colors.textSecondary} />,
                             "Notifications",
                             <Switch
-                                value={notifications}
-                                onValueChange={setNotifications}
+                                value={notificationsEnabled}
+                                onValueChange={setNotificationsEnabled}
                                 trackColor={{ false: colors.border, true: colors.primary }}
                                 thumbColor={'white'}
                             />
@@ -138,6 +183,13 @@ export default function SettingsScreen() {
                             "Settle Up",
                             <ChevronRight size={20} color={colors.textSecondary} />,
                             handleSettleUp
+                        )}
+                        <View style={[styles.separator, { backgroundColor: colors.border }]} />
+                        {renderSettingItem(
+                            <Trash2 size={20} color={colors.error} />,
+                            "Clear Data",
+                            <ChevronRight size={20} color={colors.textSecondary} />,
+                            handleClearData
                         )}
                     </GlassCard>
                 </View>
@@ -252,5 +304,31 @@ const styles = StyleSheet.create({
     copyrightText: {
         fontSize: 12,
         marginTop: 4,
+    },
+    themeGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        paddingHorizontal: 4,
+    },
+    themeOption: {
+        width: '30%',
+        aspectRatio: 1,
+        borderRadius: 12,
+        borderWidth: 2,
+        padding: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    themePreview: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        marginBottom: 8,
+    },
+    themeLabel: {
+        fontSize: 12,
+        fontWeight: '600',
     },
 });

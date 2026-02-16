@@ -1,6 +1,7 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ViewStyle, TextStyle } from 'react-native';
-import { Colors } from '../constants/Colors';
+import { Themes, ThemeName } from '../constants/Colors';
+import { useSplittyStore } from '../store/useSplittyStore';
 
 interface VibrantButtonProps {
     title: string;
@@ -19,25 +20,32 @@ export const VibrantButton: React.FC<VibrantButtonProps> = ({
     variant = 'primary',
     disabled = false
 }) => {
+    const colors = useSplittyStore(state => state.colors);
     const isOutline = variant === 'outline';
     const isSecondary = variant === 'secondary';
 
+    const buttonStyle = [
+        styles.button,
+        isOutline ? { backgroundColor: 'transparent', borderWidth: 2, borderColor: colors.primary } :
+            isSecondary ? { backgroundColor: colors.secondary } :
+                { backgroundColor: colors.primary },
+        disabled && { backgroundColor: colors.border, borderColor: colors.border },
+        style
+    ];
+
+    const textColor = isOutline ? colors.primary : (disabled ? colors.textSecondary : colors.text);
+    const finalTextColor = isOutline ? colors.primary : (disabled ? colors.textSecondary : colors.text);
+
     return (
         <TouchableOpacity
-            style={[
-                styles.button,
-                isOutline ? styles.outlineButton : isSecondary ? styles.secondaryButton : styles.primaryButton,
-                disabled && styles.disabledButton,
-                style
-            ]}
+            style={buttonStyle}
             onPress={onPress}
             activeOpacity={0.8}
             disabled={disabled}
         >
             <Text style={[
                 styles.text,
-                isOutline ? styles.outlineText : styles.text,
-                disabled && styles.disabledText,
+                { color: finalTextColor },
                 textStyle
             ]}>
                 {title}
@@ -55,30 +63,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    primaryButton: {
-        backgroundColor: Colors.primary,
-    },
-    secondaryButton: {
-        backgroundColor: Colors.secondary,
-    },
-    outlineButton: {
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderColor: Colors.primary,
-    },
     text: {
         fontSize: 16,
         fontWeight: '700',
-        color: Colors.text,
-    },
-    outlineText: {
-        color: Colors.primary,
-    },
-    disabledButton: {
-        backgroundColor: Colors.border,
-        borderColor: Colors.border,
-    },
-    disabledText: {
-        color: Colors.textSecondary,
     },
 });

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../../store/useSplittyStore';
-import { LightColors, DarkColors } from '../../constants/Colors';
+import { Themes, ThemeName, Colors } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { ArrowLeft, User, Banknote, Trash2, Users } from 'lucide-react-native';
 import { getCategoryById } from '../../constants/Categories';
@@ -10,9 +10,8 @@ import { getCategoryById } from '../../constants/Categories';
 export default function FriendDetailsScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const { friends, expenses, groups, isDarkMode, formatCurrency, deleteExpense } = useSplittyStore();
-
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { friends, expenses, groups, appearance, colors, formatCurrency, deleteExpense } = useSplittyStore();
+    const isDark = appearance === 'dark';
 
     const friend = friends.find(f => f.id === id);
 
@@ -94,7 +93,7 @@ export default function FriendDetailsScreen() {
             <ScrollView contentContainerStyle={styles.container}>
                 {/* Friend Summary Card */}
                 <GlassCard style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.avatar, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
+                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
                         <User size={32} color={colors.primary} />
                     </View>
                     <Text style={[styles.friendName, { color: colors.text }]}>{friend.name}</Text>

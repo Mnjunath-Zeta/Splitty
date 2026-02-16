@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { supabase } from '../lib/supabase';
-import { LightColors, DarkColors } from '../constants/Colors';
+import { Themes, ThemeName, Colors } from '../constants/Colors';
 import { useSplittyStore } from '../store/useSplittyStore';
 import { StyledInput } from '../components/StyledInput';
 import { VibrantButton } from '../components/VibrantButton';
@@ -13,8 +13,8 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function AuthScreen() {
     const router = useRouter();
-    const { isDarkMode } = useSplittyStore();
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { appearance, colors } = useSplittyStore();
+    const isDark = appearance === 'dark';
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle, Platform, StyleProp } from 'react-native';
-import { Colors, GlassTheme } from '../constants/Colors';
+import { Themes, ThemeName } from '../constants/Colors';
+import { useSplittyStore } from '../store/useSplittyStore';
 
 interface GlassCardProps {
     children: React.ReactNode;
@@ -8,8 +9,16 @@ interface GlassCardProps {
 }
 
 export const GlassCard: React.FC<GlassCardProps> = ({ children, style }) => {
+    const appearance = useSplittyStore(state => state.appearance);
+    const isDark = appearance === 'dark';
+
+    const glassStyle: ViewStyle = {
+        backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.8)',
+        borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+    };
+
     return (
-        <View style={[styles.card, style]}>
+        <View style={[styles.card, glassStyle, style]}>
             {children}
         </View>
     );
@@ -17,11 +26,9 @@ export const GlassCard: React.FC<GlassCardProps> = ({ children, style }) => {
 
 const styles = StyleSheet.create({
     card: {
-        backgroundColor: GlassTheme.background,
         borderRadius: 24,
         padding: 20,
         borderWidth: 1,
-        borderColor: GlassTheme.border,
         ...Platform.select({
             ios: {
                 shadowColor: '#64748B', // Slate 500 shadow

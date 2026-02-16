@@ -1,12 +1,11 @@
 import { Tabs } from 'expo-router';
-import { LightColors, DarkColors } from '../../constants/Colors';
 import { Home, Users, LayoutGrid, Settings } from 'lucide-react-native';
 import { Platform } from 'react-native';
 import { useSplittyStore } from '../../store/useSplittyStore';
 
 export default function TabsLayout() {
-    const { isDarkMode } = useSplittyStore();
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { appearance, colors } = useSplittyStore();
+    const isDark = appearance === 'dark';
 
     return (
         <Tabs

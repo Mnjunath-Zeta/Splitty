@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSplittyStore } from '../store/useSplittyStore';
-import { LightColors, DarkColors } from '../constants/Colors';
+import { Themes, ThemeName, Colors } from '../constants/Colors';
 import { GlassCard } from '../components/GlassCard';
 import { ArrowLeft, ArrowUpRight, ArrowDownLeft } from 'lucide-react-native';
 import { PieChart, BarChart } from 'react-native-gifted-charts';
@@ -10,8 +10,8 @@ import { getCategoryById } from '../constants/Categories';
 
 export default function AnalyticsScreen() {
     const router = useRouter();
-    const { expenses, isDarkMode, formatCurrency } = useSplittyStore();
-    const colors = isDarkMode ? DarkColors : LightColors;
+    const { expenses, friends, groups, appearance, colors, formatCurrency } = useSplittyStore();
+    const isDark = appearance === 'dark';
     const { width } = Dimensions.get('window');
 
     // 1. Spending by Category (Pie Chart)
@@ -66,6 +66,48 @@ export default function AnalyticsScreen() {
     const totalSpent = Object.values(categorySpending).reduce((a, b) => a + b, 0);
     const maxMonthly = Math.max(...Object.values(monthlySpending));
 
+    // 3. Friend-wise spending
+    const friendSpending: Record<string, number> = {};
+    expenses.forEach(e => {
+        if (e.isSettlement) return;
+        if (e.splitType === 'unequal' && e.splitDetails) {
+            Object.entries(e.splitDetails).forEach(([id, amount]) => {
+                if (id !== 'self') {
+                    friendSpending[id] = (friendSpending[id] || 0) + amount;
+                }
+            });
+        } else if (e.splitWith) {
+            const share = e.amount / (e.splitWith.length + 1);
+            e.splitWith.forEach(id => {
+                friendSpending[id] = (friendSpending[id] || 0) + share;
+            });
+        }
+    });
+
+    const friendSpendData = Object.entries(friendSpending).map(([id, amount]) => {
+        const friend = friends.find(f => f.id === id);
+        return {
+            name: friend?.name || 'Unknown',
+            amount: amount,
+            percentage: totalSpent > 0 ? (amount / totalSpent) * 100 : 0
+        };
+    }).sort((a, b) => b.amount - a.amount).slice(0, 5); // Top 5
+
+    // 4. Group-wise spending
+    const groupSpending: Record<string, number> = {};
+    expenses.forEach(e => {
+        if (e.isSettlement || !e.groupId) return;
+        groupSpending[e.groupId] = (groupSpending[e.groupId] || 0) + e.amount;
+    });
+
+    const groupSpendData = Object.entries(groupSpending).map(([id, amount]) => {
+        const group = groups.find(g => g.id === id);
+        return {
+            name: group?.name || 'Unknown',
+            amount: amount,
+        };
+    }).sort((a, b) => b.amount - a.amount).slice(0, 5);
+
     return (
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
             <View style={styles.header}>
@@ -76,15 +118,17 @@ export default function AnalyticsScreen() {
                 <View style={{ width: 24 }} />
             </View>
 
-            <ScrollView contentContainerStyle={styles.container}>
-                {/* Total Spending Summary */}
-                <GlassCard style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Spending (All Time)</Text>
-                    <Text style={[styles.summaryAmount, { color: colors.text }]}>{formatCurrency(totalSpent)}</Text>
-                </GlassCard>
+            <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+                {/* Overview Cards */}
+                <View style={styles.overviewRow}>
+                    <GlassCard style={[styles.overviewCard, { backgroundColor: colors.surface }]}>
+                        <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Total Spent</Text>
+                        <Text style={[styles.summaryAmount, { color: colors.text }]}>{formatCurrency(totalSpent)}</Text>
+                    </GlassCard>
+                </View>
 
                 {/* Monthly Trend */}
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly Spending Trend</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Monthly Trend</Text>
                 <GlassCard style={[styles.chartCard, { backgroundColor: colors.surface }]}>
                     {maxMonthly > 0 ? (
                         <BarChart
@@ -99,62 +143,109 @@ export default function AnalyticsScreen() {
                             yAxisTextStyle={{ color: colors.textSecondary }}
                             noOfSections={4}
                             maxValue={maxMonthly * 1.2}
-                            height={200}
+                            height={180}
                             width={width - 80}
                             xAxisLabelTextStyle={{ color: colors.textSecondary }}
                         />
                     ) : (
-                        <View style={{ height: 200, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ color: colors.textSecondary }}>No data yet</Text>
+                        <View style={styles.emptyContainer}>
+                            <Text style={{ color: colors.textSecondary }}>No data available</Text>
                         </View>
                     )}
                 </GlassCard>
 
                 {/* Category Breakdown */}
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 24 }]}>Spending by Category</Text>
-                <GlassCard style={[styles.chartCard, { backgroundColor: colors.surface, alignItems: 'center' }]}>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 24 }]}>Category Breakdown</Text>
+                <GlassCard style={[styles.chartCard, { backgroundColor: colors.surface }]}>
                     {pieData.length > 0 ? (
-                        <View style={{ alignItems: 'center' }}>
-                            <PieChart
-                                data={pieData}
-                                donut
-                                showGradient
-                                sectionAutoFocus
-                                radius={90}
-                                innerRadius={60}
-                                innerCircleColor={colors.surface}
-                                centerLabelComponent={() => {
-                                    return (
-                                        <View style={{ justifyContent: 'center', alignItems: 'center' }}>
-                                            <Text style={{ fontSize: 22, color: colors.text, fontWeight: 'bold' }}>
-                                                {pieData.length}
-                                            </Text>
-                                            <Text style={{ fontSize: 12, color: colors.textSecondary }}>Categories</Text>
+                        <View>
+                            <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                                <PieChart
+                                    data={pieData}
+                                    donut
+                                    showGradient
+                                    radius={85}
+                                    innerRadius={55}
+                                    innerCircleColor={colors.surface}
+                                    centerLabelComponent={() => (
+                                        <View style={{ alignItems: 'center' }}>
+                                            <Text style={{ fontSize: 20, color: colors.text, fontWeight: 'bold' }}>{pieData.length}</Text>
+                                            <Text style={{ fontSize: 10, color: colors.textSecondary }}>Categories</Text>
                                         </View>
-                                    );
-                                }}
-                            />
-                            {/* Legend */}
-                            <View style={styles.legendContainer}>
-                                {pieData.map((item, index) => (
-                                    <View key={index} style={styles.legendItem}>
-                                        <View style={[styles.legendColor, { backgroundColor: item.color }]} />
-                                        <Text style={[styles.legendText, { color: colors.text }]}>{item.categoryName}</Text>
-                                        <Text style={[styles.legendAmount, { color: colors.textSecondary }]}>
-                                            {formatCurrency(item.amount)} ({item.text})
-                                        </Text>
-                                    </View>
-                                ))}
+                                    )}
+                                />
                             </View>
+                            {pieData.map((item, index) => (
+                                <View key={index} style={styles.rankingItem}>
+                                    <View style={[styles.legendColor, { backgroundColor: item.color }]} />
+                                    <View style={{ flex: 1 }}>
+                                        <View style={styles.rankingHeader}>
+                                            <Text style={[styles.rankingName, { color: colors.text }]}>{item.categoryName}</Text>
+                                            <Text style={[styles.rankingAmount, { color: colors.text }]}>{formatCurrency(item.amount)}</Text>
+                                        </View>
+                                        <View style={[styles.progressBarBase, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }]}>
+                                            <View style={[styles.progressBarFill, { backgroundColor: item.color, width: `${(item.amount / totalSpent) * 100}%` }]} />
+                                        </View>
+                                    </View>
+                                </View>
+                            ))}
                         </View>
                     ) : (
-                        <View style={{ height: 200, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ color: colors.textSecondary }}>No data yet</Text>
+                        <View style={styles.emptyContainer}>
+                            <Text style={{ color: colors.textSecondary }}>No categories yet</Text>
                         </View>
                     )}
                 </GlassCard>
 
-                <View style={{ height: 40 }} />
+                {/* Friend-wise Breakdown */}
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 24 }]}>Spend Split with Friends</Text>
+                <GlassCard style={[styles.chartCard, { backgroundColor: colors.surface }]}>
+                    {friendSpendData.length > 0 ? (
+                        friendSpendData.map((item, index) => (
+                            <View key={index} style={styles.rankingItem}>
+                                <View style={{ flex: 1 }}>
+                                    <View style={styles.rankingHeader}>
+                                        <Text style={[styles.rankingName, { color: colors.text }]}>{item.name}</Text>
+                                        <Text style={[styles.rankingAmount, { color: colors.text }]}>{formatCurrency(item.amount)}</Text>
+                                    </View>
+                                    <View style={[styles.progressBarBase, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }]}>
+                                        <View style={[styles.progressBarFill, { backgroundColor: colors.primary, width: `${item.percentage}%` }]} />
+                                    </View>
+                                </View>
+                            </View>
+                        ))
+                    ) : (
+                        <View style={styles.emptyContainer}>
+                            <Text style={{ color: colors.textSecondary }}>No shared expenses yet</Text>
+                        </View>
+                    )}
+                </GlassCard>
+
+                {/* Group Activity */}
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 24 }]}>Spending by Group</Text>
+                <GlassCard style={[styles.chartCard, { backgroundColor: colors.surface }]}>
+                    {groupSpendData.length > 0 ? (
+                        groupSpendData.map((item, index) => (
+                            <View key={index} style={styles.rankingItem}>
+                                <View style={{ flex: 1 }}>
+                                    <View style={styles.rankingHeader}>
+                                        <Text style={[styles.rankingName, { color: colors.text }]}>{item.name}</Text>
+                                        <Text style={[styles.rankingAmount, { color: colors.text }]}>{formatCurrency(item.amount)}</Text>
+                                    </View>
+                                    <View style={[styles.progressBarBase, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }]}>
+                                        <View style={[styles.progressBarFill, { backgroundColor: colors.secondary, width: `${(item.amount / totalSpent) * 100}%` }]} />
+                                    </View>
+                                </View>
+                            </View>
+                        ))
+                    ) : (
+                        <View style={styles.emptyContainer}>
+                            <Text style={{ color: colors.textSecondary }}>No group expenses yet</Text>
+                        </View>
+                    )}
+                </GlassCard>
+
+                <View style={{ height: 60 }} />
             </ScrollView>
         </SafeAreaView>
     );
@@ -182,10 +273,12 @@ const styles = StyleSheet.create({
         padding: 20,
         paddingTop: 0,
     },
-    summaryCard: {
+    overviewRow: {
+        marginBottom: 24,
+    },
+    overviewCard: {
         padding: 24,
         alignItems: 'center',
-        marginBottom: 24,
     },
     summaryLabel: {
         fontSize: 14,
@@ -204,27 +297,45 @@ const styles = StyleSheet.create({
         padding: 20,
         overflow: 'hidden',
     },
-    legendContainer: {
-        marginTop: 24,
-        width: '100%',
+    emptyContainer: {
+        height: 150,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    legendItem: {
+    rankingItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 12,
+        marginBottom: 16,
     },
-    legendColor: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        marginRight: 8,
+    rankingHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
     },
-    legendText: {
-        fontSize: 14,
-        flex: 1,
-    },
-    legendAmount: {
+    rankingName: {
         fontSize: 14,
         fontWeight: '600',
+    },
+    rankingAmount: {
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    progressBarBase: {
+        height: 8,
+        borderRadius: 4,
+        width: '100%',
+        overflow: 'hidden',
+    },
+    progressBarFill: {
+        height: '100%',
+        borderRadius: 4,
+    },
+    legendColor: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        marginRight: 10,
+        marginTop: -16, // Align with text
     },
 });

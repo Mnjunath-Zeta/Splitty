@@ -2,16 +2,18 @@ import { useEffect } from 'react';
 import { Alert } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { Colors } from '../constants/Colors';
+import { StatusBar } from 'expo-status-bar';
 import { useSplittyStore } from '../store/useSplittyStore';
 import { supabase } from '../lib/supabase';
 
 export default function RootLayout() {
     const router = useRouter();
     const segments = useSegments();
-    const { setSession, fetchData, subscribeToChanges } = useSplittyStore();
+    const { setSession, fetchData, subscribeToChanges, initNotifications } = useSplittyStore();
     const session = useSplittyStore(state => state.session);
 
     useEffect(() => {
+        initNotifications();
         console.log('RootLayout: Initializing Auth...');
 
         // Recurring Expenses Check
@@ -62,30 +64,37 @@ export default function RootLayout() {
         };
     }, [session]);
 
+    const appearance = useSplittyStore(state => state.appearance);
+    const colors = useSplittyStore(state => state.colors);
+    const isDark = appearance === 'dark';
+
     return (
-        <Stack
-            screenOptions={{
-                headerStyle: {
-                    backgroundColor: '#1E1B4B',
-                },
-                headerTitleStyle: {
-                    color: '#FFFFFF',
-                    fontWeight: 'bold',
-                },
-                headerShadowVisible: false,
-                headerTintColor: Colors.primary,
-            }}
-        >
-            <Stack.Screen name="index" options={{ headerShown: false, title: '' }} />
-            <Stack.Screen name="auth" options={{ headerShown: false, title: '' }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-                name="add-expense"
-                options={{
-                    presentation: 'modal',
-                    headerShown: true
+        <>
+            <StatusBar style={isDark ? 'light' : 'dark'} />
+            <Stack
+                screenOptions={{
+                    headerStyle: {
+                        backgroundColor: colors.background,
+                    },
+                    headerTitleStyle: {
+                        color: colors.text,
+                        fontWeight: 'bold',
+                    },
+                    headerShadowVisible: false,
+                    headerTintColor: colors.primary,
                 }}
-            />
-        </Stack>
+            >
+                <Stack.Screen name="index" options={{ headerShown: false, title: '' }} />
+                <Stack.Screen name="auth" options={{ headerShown: false, title: '' }} />
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen
+                    name="add-expense"
+                    options={{
+                        presentation: 'modal',
+                        headerShown: true
+                    }}
+                />
+            </Stack>
+        </>
     );
 }
