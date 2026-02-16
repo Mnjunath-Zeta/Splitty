@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Alert } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { Colors } from '../constants/Colors';
 import { StatusBar } from 'expo-status-bar';
@@ -68,9 +68,18 @@ export default function RootLayout() {
     const colors = useSplittyStore(state => state.colors);
     const isDark = appearance === 'dark';
 
+    const isConfigMissing = !process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
     return (
         <>
             <StatusBar style={isDark ? 'light' : 'dark'} />
+            {isConfigMissing && (
+                <View style={{ backgroundColor: '#EF4444', padding: 10, paddingTop: 50 }}>
+                    <Text style={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>
+                        ⚠️ Supabase Config Missing in Vercel. Please add Env Vars!
+                    </Text>
+                </View>
+            )}
             <Stack
                 screenOptions={{
                     headerStyle: {
