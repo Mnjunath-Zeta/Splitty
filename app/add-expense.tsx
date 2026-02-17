@@ -10,6 +10,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CATEGORIES, CategoryKey } from '../constants/Categories';
 import { Frequency } from '../store/useSplittyStore';
 
+import { FriendSelector } from '../components/FriendSelector';
+import { SplitDetails } from '../components/SplitDetails';
+
 export default function AddExpenseScreen() {
     const router = useRouter();
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -53,21 +56,14 @@ export default function AddExpenseScreen() {
         return friends.find(f => f.id === userId)?.name || 'Unknown';
     };
 
-    // Toggle logic
-    const toggleSelection = (itemId: string) => {
+    // Memoized toggle
+    const toggleSelection = React.useCallback((itemId: string) => {
         if (type === 'group') {
-            // Single select for groups
-            // If clicking same, deselect? Or just replace? Replace is standard.
             setSelectedIds([itemId]);
         } else {
-            // Multi select for individuals
-            if (selectedIds.includes(itemId)) {
-                setSelectedIds(selectedIds.filter(i => i !== itemId));
-            } else {
-                setSelectedIds([...selectedIds, itemId]);
-            }
+            setSelectedIds(prev => prev.includes(itemId) ? prev.filter(i => i !== itemId) : [...prev, itemId]);
         }
-    };
+    }, [type]);
 
     // Initialize Edit Mode
     useEffect(() => {
@@ -102,8 +98,6 @@ export default function AddExpenseScreen() {
     }, [id, expenses]);
 
     // Reset logic when switching tabs
-    // Note: We don't reset when selecting items, only when switching type mainly.
-    // Actually, keeping selections when switching tabs might be confusing if lists are disjoint.
     const handleTypeChange = (newType: 'individual' | 'group') => {
         setType(newType);
         setSelectedIds([]);
@@ -183,7 +177,6 @@ export default function AddExpenseScreen() {
         }, 0);
     }
     const remainingAmount = numericAmount - currentSplitTotal;
-    const isSplitValid = Math.abs(remainingAmount) < 0.05;
 
     return (
         <ScrollView style={[styles.container, { backgroundColor: colors.background }]} keyboardShouldPersistTaps="handled">
@@ -287,57 +280,13 @@ export default function AddExpenseScreen() {
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.list}>
-                {type === 'individual' ? (
-                    friends.map(friend => {
-                        const isSelected = selectedIds.includes(friend.id);
-                        return (
-                            <TouchableOpacity
-                                key={friend.id}
-                                style={[
-                                    styles.listItem,
-                                    { backgroundColor: colors.surface },
-                                    isSelected && { borderColor: colors.primary, backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)' }
-                                ]}
-                                onPress={() => toggleSelection(friend.id)}
-                            >
-                                <Text style={[styles.itemText, { color: colors.text }, isSelected && { color: colors.primary, fontWeight: '700' }]}>{friend.name}</Text>
-                                <View style={[
-                                    styles.checkbox,
-                                    { borderColor: colors.textSecondary },
-                                    isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }
-                                ]}>
-                                    {isSelected && <Check size={14} color="white" />}
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })
-                ) : (
-                    groups.map(group => {
-                        const isSelected = selectedIds.includes(group.id);
-                        return (
-                            <TouchableOpacity
-                                key={group.id}
-                                style={[
-                                    styles.listItem,
-                                    { backgroundColor: colors.surface },
-                                    isSelected && { borderColor: colors.primary, backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.1)' }
-                                ]}
-                                onPress={() => toggleSelection(group.id)}
-                            >
-                                <Text style={[styles.itemText, { color: colors.text }, isSelected && { color: colors.primary, fontWeight: '700' }]}>{group.name}</Text>
-                                <View style={[
-                                    styles.checkbox,
-                                    { borderColor: colors.textSecondary },
-                                    isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }
-                                ]}>
-                                    {isSelected && <Check size={14} color="white" />}
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })
-                )}
-            </View>
+            <FriendSelector
+                type={type}
+                friends={friends}
+                groups={groups}
+                selectedIds={selectedIds}
+                onToggle={toggleSelection}
+            />
 
             {
                 selectedIds.length === 0 && (
@@ -347,91 +296,18 @@ export default function AddExpenseScreen() {
 
             {
                 selectedIds.length > 0 && (
-                    <View style={styles.advancedSection}>
-                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Details</Text>
-                        <GlassCard style={styles.detailsCard}>
-                            {/* Payer Selection */}
-                            <Text style={[styles.label, { color: colors.textSecondary }]}>Paid by</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                                {participants.map(pId => (
-                                    <TouchableOpacity
-                                        key={pId}
-                                        style={[
-                                            styles.chip,
-                                            { backgroundColor: colors.background, borderColor: colors.border },
-                                            payerId === pId && { backgroundColor: colors.primary, borderColor: colors.primary }
-                                        ]}
-                                        onPress={() => setPayerId(pId)}
-                                    >
-                                        <Text style={[
-                                            styles.chipText,
-                                            { color: colors.textSecondary },
-                                            payerId === pId && { color: 'white', fontWeight: '600' }
-                                        ]}>
-                                            {getName(pId)}
-                                        </Text>
-                                        {payerId === pId && <Check size={14} color="white" style={{ marginLeft: 4 }} />}
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-
-                            {/* Split Type Selection */}
-                            <Text style={[styles.label, { marginTop: 16, color: colors.textSecondary }]}>Split distribution</Text>
-                            <View style={[styles.splitToggle, { backgroundColor: colors.background }]}>
-                                <TouchableOpacity
-                                    style={[styles.toggleOption, splitType === 'equal' && { backgroundColor: colors.surface }]}
-                                    onPress={() => setSplitType('equal')}
-                                >
-                                    <Text style={[styles.toggleText, { color: colors.textSecondary }, splitType === 'equal' && { color: colors.text, fontWeight: '600' }]}>Equally</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.toggleOption, splitType === 'unequal' && { backgroundColor: colors.surface }]}
-                                    onPress={() => setSplitType('unequal')}
-                                >
-                                    <Text style={[styles.toggleText, { color: colors.textSecondary }, splitType === 'unequal' && { color: colors.text, fontWeight: '600' }]}>Unequal</Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Unequal Inputs */}
-                            {splitType === 'unequal' && (
-                                <View style={styles.unequalContainer}>
-                                    {participants.map(pId => (
-                                        <StyledInput
-                                            key={pId}
-                                            label={getName(pId)}
-                                            value={manualAmounts[pId] || ''}
-                                            onChangeText={(text) => setManualAmounts(prev => ({ ...prev, [pId]: text }))}
-                                            placeholder="0.00"
-                                            keyboardType="numeric"
-                                        />
-                                    ))}
-                                </View>
-                            )}
-
-                            {splitType === 'unequal' && (
-                                <View style={styles.splitFeedback}>
-                                    {Math.abs(remainingAmount) < 0.05 ? (
-                                        <View style={styles.feedbackRow}>
-                                            <Check size={16} color={colors.success} />
-                                            <Text style={[styles.feedbackText, { color: colors.success }]}>Perfectly split!</Text>
-                                        </View>
-                                    ) : (
-                                        <Text style={[styles.feedbackText, { color: remainingAmount > 0 ? colors.secondary : colors.error }]}>
-                                            {remainingAmount > 0
-                                                ? `Remaining: ${formatCurrency(remainingAmount)}`
-                                                : `Over by: ${formatCurrency(Math.abs(remainingAmount))}`
-                                            }
-                                        </Text>
-                                    )}
-                                </View>
-                            )}
-                            {splitType === 'equal' && (
-                                <Text style={[styles.hintText, { color: colors.textSecondary }]}>
-                                    Total {formatCurrency(parseFloat(amount || '0'))} will be split equally ({formatCurrency(parseFloat(amount || '0') / participants.length)} / person).
-                                </Text>
-                            )}
-                        </GlassCard>
-                    </View>
+                    <SplitDetails
+                        participants={participants}
+                        payerId={payerId}
+                        setPayerId={setPayerId}
+                        splitType={splitType}
+                        setSplitType={setSplitType}
+                        manualAmounts={manualAmounts}
+                        setManualAmounts={setManualAmounts}
+                        remainingAmount={remainingAmount}
+                        amount={amount}
+                        getName={getName}
+                    />
                 )
             }
 
@@ -483,27 +359,13 @@ const styles = StyleSheet.create({
     activeTabText: {
         color: 'white',
     },
-    list: {
-        marginBottom: 20,
+    saveButton: {
+        marginBottom: 50,
     },
-    listItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 16,
-        borderRadius: 12,
+    label: {
+        fontSize: 14,
         marginBottom: 8,
-        borderWidth: 1,
-        borderColor: 'transparent',
-    },
-    selectedItem: {
-        borderWidth: 1,
-    },
-    itemText: {
-        fontSize: 16,
-    },
-    selectedItemText: {
-        fontWeight: '700',
+        fontWeight: '600',
     },
     checkbox: {
         width: 24,
@@ -512,19 +374,6 @@ const styles = StyleSheet.create({
         borderWidth: 2,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    checkedCheckbox: {
-    },
-    advancedSection: {
-        marginBottom: 30,
-    },
-    detailsCard: {
-        padding: 16,
-    },
-    label: {
-        fontSize: 14,
-        marginBottom: 8,
-        fontWeight: '600',
     },
     chipScroll: {
         flexDirection: 'row',
@@ -539,90 +388,14 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 1,
     },
-    activeChip: {
-    },
     chipText: {
         fontSize: 14,
-    },
-    activeChipText: {
-        color: 'white',
-        fontWeight: '600',
-    },
-    splitToggle: {
-        flexDirection: 'row',
-        borderRadius: 8,
-        padding: 4,
-        marginBottom: 16,
-    },
-    toggleOption: {
-        flex: 1,
-        alignItems: 'center',
-        paddingVertical: 8,
-        borderRadius: 6,
-    },
-    activeToggle: {
-    },
-    toggleText: {
-        fontSize: 14,
-    },
-    activeToggleText: {
-        fontWeight: '600',
-    },
-    unequalContainer: {
-        gap: 12,
-        marginTop: 8,
-    },
-    splitInputRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 4,
-    },
-    nameContainer: {
-        flex: 1,
-        paddingRight: 10,
-    },
-    splitName: {
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    splitSubtext: {
-        fontSize: 12,
-    },
-    smallInput: {
-        width: 120,
-        textAlign: 'right',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        height: 48,
-        marginBottom: 0,
-    },
-    hintText: {
-        fontSize: 12,
-        fontStyle: 'italic',
-        marginTop: 8,
-    },
-    saveButton: {
-        marginBottom: 50,
     },
     warningText: {
         textAlign: 'center',
         fontStyle: 'italic',
         marginTop: 20,
         marginBottom: 20,
-    },
-    splitFeedback: {
-        marginTop: 16,
-        alignItems: 'center',
-    },
-    feedbackRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    feedbackText: {
-        fontWeight: '600',
-        fontSize: 14,
     },
     recurringContainer: {
         marginTop: 16,

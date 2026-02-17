@@ -21,6 +21,11 @@ export default function AuthScreen() {
     const [loading, setLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
 
+    const [phone, setPhone] = useState('');
+    const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+    const [verificationCode, setVerificationCode] = useState('');
+    const [showVerification, setShowVerification] = useState(false);
+
     const handleGoogleSignIn = async () => {
         setLoading(true);
         try {
@@ -70,7 +75,58 @@ export default function AuthScreen() {
         }
     };
 
+    const handlePhoneSignIn = async () => {
+        setLoading(true);
+        try {
+            // Basic validation
+            if (!phone || phone.length < 10) {
+                throw new Error('Please enter a valid phone number');
+            }
+
+            // Ensure E.164 format if possible, or assume country code if user provides it.
+            // For simplicity, let's assume user enters full number or we default to a region if implementing robustly.
+            // Here we just pass it to supabase.
+
+            const { error } = await supabase.auth.signInWithOtp({
+                phone: phone,
+            });
+            if (error) throw error;
+            setShowVerification(true);
+            Alert.alert('OTP Sent', 'Please check your phone for verification code.');
+        } catch (error: any) {
+            Alert.alert('Error', error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const verifyOtp = async () => {
+        setLoading(true);
+        try {
+            const { error } = await supabase.auth.verifyOtp({
+                phone: phone,
+                token: verificationCode,
+                type: 'sms',
+            });
+            if (error) throw error;
+            // Success - session will auto-update
+        } catch (error: any) {
+            Alert.alert('Error', error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleAuth = async () => {
+        if (authMethod === 'phone') {
+            if (showVerification) {
+                await verifyOtp();
+            } else {
+                await handlePhoneSignIn();
+            }
+            return;
+        }
+
         setLoading(true);
         try {
             if (isSignUp) {
@@ -97,36 +153,80 @@ export default function AuthScreen() {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={styles.content}>
-                <Text style={[styles.title, { color: colors.text }]}>{isSignUp ? 'Create Account' : 'Welcome Back'}</Text>
+                <Text style={[styles.title, { color: colors.text }]}>
+                    {authMethod === 'phone'
+                        ? (showVerification ? 'Verify Phone' : 'Phone Sign In')
+                        : (isSignUp ? 'Create Account' : 'Welcome Back')}
+                </Text>
 
-                <StyledInput
-                    label="Email"
-                    value={email}
-                    onChangeText={setEmail}
-                    autoCapitalize="none"
-                    placeholder="Enter your email"
-                />
+                <View style={styles.methodToggle}>
+                    <TouchableOpacity
+                        style={[styles.methodBtn, authMethod === 'email' && { backgroundColor: colors.primary }]}
+                        onPress={() => { setAuthMethod('email'); setShowVerification(false); }}
+                    >
+                        <Text style={{ color: authMethod === 'email' ? 'white' : colors.text }}>Email</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.methodBtn, authMethod === 'phone' && { backgroundColor: colors.primary }]}
+                        onPress={() => { setAuthMethod('phone'); setShowVerification(false); }}
+                    >
+                        <Text style={{ color: authMethod === 'phone' ? 'white' : colors.text }}>Phone</Text>
+                    </TouchableOpacity>
+                </View>
 
-                <StyledInput
-                    label="Password"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                    placeholder="Enter your password"
-                />
+                {authMethod === 'email' ? (
+                    <>
+                        <StyledInput
+                            label="Email"
+                            value={email}
+                            onChangeText={setEmail}
+                            autoCapitalize="none"
+                            placeholder="Enter your email"
+                        />
+                        <StyledInput
+                            label="Password"
+                            value={password}
+                            onChangeText={setPassword}
+                            secureTextEntry
+                            placeholder="Enter your password"
+                        />
+                    </>
+                ) : (
+                    <>
+                        {!showVerification ? (
+                            <StyledInput
+                                label="Phone Number"
+                                value={phone}
+                                onChangeText={setPhone}
+                                placeholder="+1234567890"
+                                keyboardType="phone-pad"
+                            />
+                        ) : (
+                            <StyledInput
+                                label="Verification Code"
+                                value={verificationCode}
+                                onChangeText={setVerificationCode}
+                                placeholder="123456"
+                                keyboardType="number-pad"
+                            />
+                        )}
+                    </>
+                )}
 
                 <VibrantButton
-                    title={loading ? 'Please wait...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+                    title={loading ? 'Please wait...' : (authMethod === 'phone' ? (showVerification ? 'Verify' : 'Send Code') : (isSignUp ? 'Sign Up' : 'Sign In'))}
                     onPress={handleAuth}
                     disabled={loading}
                     style={styles.button}
                 />
 
-                <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)} style={styles.toggleButton}>
-                    <Text style={{ color: colors.primary }}>
-                        {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-                    </Text>
-                </TouchableOpacity>
+                {authMethod === 'email' && (
+                    <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)} style={styles.toggleButton}>
+                        <Text style={{ color: colors.primary }}>
+                            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+                        </Text>
+                    </TouchableOpacity>
+                )}
 
                 <View style={styles.divider}>
                     <View style={[styles.line, { backgroundColor: colors.border }]} />
@@ -183,5 +283,18 @@ const styles = StyleSheet.create({
     },
     googleButton: {
         marginTop: 0,
+    },
+    methodToggle: {
+        flexDirection: 'row',
+        marginBottom: 20,
+        backgroundColor: 'rgba(150,150,150,0.1)',
+        padding: 4,
+        borderRadius: 12,
+    },
+    methodBtn: {
+        flex: 1,
+        paddingVertical: 10,
+        alignItems: 'center',
+        borderRadius: 8,
     },
 });

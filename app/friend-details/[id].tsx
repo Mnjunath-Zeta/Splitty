@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, ScrollView, Image } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../../store/useSplittyStore';
 import { Themes, ThemeName, Colors } from '../../constants/Colors';
@@ -25,19 +25,19 @@ export default function FriendDetailsScreen() {
     // Or if Friend is `payerId`.
 
     const friendExpenses = expenses.filter(e => {
-        // Exclude settlements for general "Activity" list? 
-        // User asked for "all the activities where this friend was in" and "open for edit".
-        // Settlements ARE activities.
-
         const isPayer = e.payerId === id;
-        const isInvolved = e.splitDetails && Object.keys(e.splitDetails).includes(id);
+        const inSplitWith = e.splitWith?.includes(id);
+        const inSplitDetails = e.splitDetails && Object.keys(e.splitDetails).includes(id);
 
-        // Also if User paid and Friend is involved. (isInvolved covers this if splitDetails has friendId)
-        // If Friend paid and User is involved (User is in splitDetails).
-        // If Third party paid? Store only tracks "User" perspective usually unless fully group aware.
-        // Assuming `expenses` contains all group expenses too.
+        let inGroup = false;
+        if (e.groupId) {
+            const group = groups.find(g => g.id === e.groupId);
+            if (group && group.members.includes(id)) {
+                inGroup = true;
+            }
+        }
 
-        return isPayer || isInvolved;
+        return isPayer || inSplitWith || inSplitDetails || inGroup;
     });
 
     // Sort by date desc
@@ -93,8 +93,12 @@ export default function FriendDetailsScreen() {
             <ScrollView contentContainerStyle={styles.container}>
                 {/* Friend Summary Card */}
                 <GlassCard style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
-                        <User size={32} color={colors.primary} />
+                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground, overflow: 'hidden' }]}>
+                        {friend.avatarUrl ? (
+                            <Image source={{ uri: friend.avatarUrl }} style={styles.avatarImage} />
+                        ) : (
+                            <User size={32} color={colors.primary} />
+                        )}
                     </View>
                     <Text style={[styles.friendName, { color: colors.text }]}>{friend.name}</Text>
 
@@ -215,6 +219,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 16,
+    },
+    avatarImage: {
+        width: '100%',
+        height: '100%',
     },
     friendName: {
         fontSize: 24,

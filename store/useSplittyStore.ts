@@ -11,6 +11,8 @@ export interface Friend {
     id: string;
     name: string;
     balance: number;
+    linkedUserId?: string;
+    avatarUrl?: string;
 }
 
 export interface Group {
@@ -72,7 +74,7 @@ interface SplittyState {
     addRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'nextDueDate' | 'active'>) => void;
     deleteRecurringExpense: (id: string) => void;
     checkRecurringExpenses: () => number; // Returns number of created expenses
-    addFriend: (name: string) => void;
+    addFriend: (name: string, linkedUserId?: string) => void;
     addGroup: (name: string, members: string[]) => void;
     deleteFriend: (id: string) => void;
     deleteGroup: (id: string) => void;
@@ -102,6 +104,70 @@ interface SplittyState {
     initNotifications: () => Promise<void>;
 }
 
+const calculateBalances = (expenses: Expense[], friends: Friend[], groups: Group[]) => {
+    // 1. Reset balances
+    const newFriends = friends.map(f => ({ ...f, balance: 0 }));
+    const newGroups = groups.map(g => ({ ...g, balance: 0 }));
+
+    // 2. Iterate expenses
+    expenses.forEach(expense => {
+        let participants: string[] = [];
+        if (expense.groupId) {
+            const group = newGroups.find(g => g.id === expense.groupId);
+            if (group) participants = [...group.members];
+        } else if (expense.splitWith) {
+            participants = [...expense.splitWith];
+        }
+
+        const amounts: { [id: string]: number } = {};
+        if (expense.splitType === 'unequal' && expense.splitDetails) {
+            Object.assign(amounts, expense.splitDetails);
+        } else {
+            const totalPeople = participants.length + 1; // + Self
+            const splitAmount = expense.amount / totalPeople;
+            amounts['self'] = splitAmount;
+            participants.forEach(p => amounts[p] = splitAmount);
+        }
+
+        if (expense.payerId === 'self') {
+            // User paid -> Friends owe User
+            participants.forEach(friendId => {
+                const amountOwed = amounts[friendId] || 0;
+                if (amountOwed > 0) {
+                    const friend = newFriends.find(f => f.id === friendId);
+                    if (friend) {
+                        friend.balance += amountOwed;
+                    }
+                }
+            });
+
+            if (expense.groupId) {
+                const group = newGroups.find(g => g.id === expense.groupId);
+                if (group) {
+                    const ownShare = amounts['self'] || 0;
+                    group.balance += (expense.amount - ownShare);
+                }
+            }
+        } else {
+            // Friend paid -> User owes Friend
+            const payer = newFriends.find(f => f.id === expense.payerId);
+            if (payer) {
+                const myShare = amounts['self'] || 0;
+                payer.balance -= myShare;
+
+                if (expense.groupId) {
+                    const group = newGroups.find(g => g.id === expense.groupId);
+                    if (group) {
+                        group.balance -= myShare;
+                    }
+                }
+            }
+        }
+    });
+
+    return { friends: newFriends, groups: newGroups };
+};
+
 export const useSplittyStore = create<SplittyState>()(
     persist(
         (set, get) => ({
@@ -128,13 +194,16 @@ export const useSplittyStore = create<SplittyState>()(
                     }
                 });
 
-                // Fetch Profile from DB for most up-to-date info
-                const { data: profileData, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', userId)
-                    .single();
+                // Parallelize fetching for better performance
+                const [profileRes, friendsRes, groupsRes, expensesRes] = await Promise.all([
+                    supabase.from('profiles').select('*').eq('id', userId).single(),
+                    supabase.from('friends').select('*').order('name'),
+                    supabase.from('groups').select('*').order('created_at', { ascending: false }),
+                    supabase.from('expenses').select('*').order('date', { ascending: false })
+                ]);
 
+                // 1. Handle Profile
+                const { data: profileData, error: profileError } = profileRes;
                 if (!profileError && profileData) {
                     set({
                         userProfile: {
@@ -146,45 +215,53 @@ export const useSplittyStore = create<SplittyState>()(
                     });
                 }
 
-                // Fetch Friends
-                const { data: friendsData, error: friendsError } = await supabase
-                    .from('friends')
-                    .select('*')
-                    .order('name');
-
+                // 2. Handle Friends
+                const { data: friendsData, error: friendsError } = friendsRes;
                 if (!friendsError && friendsData) {
-                    const mappedFriends: Friend[] = friendsData.map((f: any) => ({
+                    let mappedFriends: Friend[] = friendsData.map((f: any) => ({
                         id: f.id,
                         name: f.name,
-                        balance: 0 // Will be recalculated by expenses loader
+                        linkedUserId: f.linked_user_id,
+                        balance: 0
                     }));
+
+                    // Fetch avatars/profiles for linked users
+                    const linkedUserIds = mappedFriends
+                        .map(f => f.linkedUserId)
+                        .filter((id): id is string => !!id);
+
+                    if (linkedUserIds.length > 0) {
+                        const { data: linkedProfiles } = await supabase
+                            .from('profiles')
+                            .select('id, avatar_url')
+                            .in('id', linkedUserIds);
+
+                        if (linkedProfiles) {
+                            const avatarMap = new Map(linkedProfiles.map((p: any) => [p.id, p.avatar_url]));
+                            mappedFriends = mappedFriends.map(f => ({
+                                ...f,
+                                avatarUrl: f.linkedUserId ? avatarMap.get(f.linkedUserId) : undefined
+                            }));
+                        }
+                    }
+
                     set({ friends: mappedFriends });
                 }
 
-                // Fetch Groups
-                const { data: groupsData, error: groupsError } = await supabase
-                    .from('groups')
-                    .select('*')
-                    .order('created_at', { ascending: false });
-
+                // 3. Handle Groups
+                const { data: groupsData, error: groupsError } = groupsRes;
                 if (!groupsError && groupsData) {
                     const mappedGroups: Group[] = groupsData.map((g: any) => ({
                         id: g.id,
                         name: g.name,
                         members: [], // We need to fetch members ideally, but for now empty
-                        balance: 0 // logic to calc balance is complex, let's keep 0 or recalc
+                        balance: 0
                     }));
-                    // For members, we might need a separate query or join. 
-                    // MVP: Just load groups.
                     set({ groups: mappedGroups });
                 }
 
-                // Fetch Expenses
-                const { data: expensesData, error: expensesError } = await supabase
-                    .from('expenses')
-                    .select('*')
-                    .order('date', { ascending: false });
-
+                // 4. Handle Expenses
+                const { data: expensesData, error: expensesError } = expensesRes;
                 if (!expensesError && expensesData) {
                     const mappedExpenses: Expense[] = expensesData.map((e: any) => ({
                         id: e.id,
@@ -192,12 +269,12 @@ export const useSplittyStore = create<SplittyState>()(
                         amount: Number(e.amount),
                         payerId: e.payer_id === userId ? 'self' : e.payer_id,
                         groupId: e.group_id,
-                        splitWith: [], // Logic needed
+                        splitWith: e.split_with || [], // Read participants
                         date: e.date,
                         splitType: e.split_type as any,
                         splitDetails: e.split_details,
                         category: e.category,
-                        isSettlement: false // Logic needed
+                        isSettlement: false
                     }));
                     console.log(`✅ fetchData complete. Loaded ${mappedExpenses.length} expenses.`);
                     set({ expenses: mappedExpenses });
@@ -220,8 +297,8 @@ export const useSplittyStore = create<SplittyState>()(
             updateUserProfile: (profile) => set((state) => ({
                 userProfile: { ...state.userProfile, ...profile }
             })),
-            addFriend: (name: string) => {
-                const newFriend = { id: Crypto.randomUUID(), name, balance: 0 };
+            addFriend: (name: string, linkedUserId?: string) => {
+                const newFriend = { id: Crypto.randomUUID(), name, balance: 0, linkedUserId };
                 set((state) => ({
                     friends: [...state.friends, newFriend]
                 }));
@@ -231,19 +308,20 @@ export const useSplittyStore = create<SplittyState>()(
                     supabase.from('friends').insert({
                         id: newFriend.id,
                         name: newFriend.name,
-                        user_id: session.user.id
+                        user_id: session.user.id,
+                        linked_user_id: linkedUserId
                     }).then(({ error }) => {
                         if (error) console.error("Friend sync error:", error);
                     });
                 }
             },
             addGroup: (name, members) => {
+                const groupId = Crypto.randomUUID();
                 set((state) => ({
-                    groups: [...state.groups, { id: Crypto.randomUUID(), name, members, balance: 0 }]
+                    groups: [...state.groups, { id: groupId, name, members, balance: 0 }]
                 }));
                 const { session } = get();
                 if (session?.user) {
-                    const groupId = Crypto.randomUUID();
                     supabase.from('groups').insert({
                         id: groupId,
                         name,
@@ -263,6 +341,53 @@ export const useSplittyStore = create<SplittyState>()(
                 friends: [],
                 groups: [],
                 expenses: [],
+                editExpense: (id, updatedExpense) => {
+                    console.log('📝 editExpense called', id, updatedExpense.description);
+                    set((state) => {
+                        const { session, friends, userProfile, fetchData } = get();
+                        const oldExpense = state.expenses.find(e => e.id === id);
+                        if (!oldExpense) return state;
+
+                        const newExpenseFull = {
+                            ...updatedExpense,
+                            id,
+                            date: oldExpense.date,
+                            splitType: updatedExpense.splitType || 'equal',
+                            splitDetails: updatedExpense.splitDetails || {}
+                        };
+
+                        if (session?.user) {
+                            const payer = friends.find(f => f.id === updatedExpense.payerId);
+                            const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
+
+                            supabase.from('expenses').update({
+                                description: newExpenseFull.description,
+                                amount: newExpenseFull.amount,
+                                payer_id: updatedExpense.payerId === 'self' ? session.user.id : null,
+                                payer_name: payerName,
+                                group_id: newExpenseFull.groupId,
+                                category: newExpenseFull.category,
+                                split_type: newExpenseFull.splitType,
+                                split_details: newExpenseFull.splitDetails,
+                                split_with: newExpenseFull.splitWith
+                            })
+                                .eq('id', id)
+                                .then(({ error }) => {
+                                    if (error) console.error("Expense edit sync error:", error);
+                                    // fetchData(); // Optional: Refresh if needed, but manual update should be enough
+                                });
+                        }
+
+                        const updatedExpenses = state.expenses.map(e => e.id === id ? newExpenseFull : e);
+                        const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
+
+                        return {
+                            expenses: updatedExpenses,
+                            friends: newFriends,
+                            groups: newGroups
+                        };
+                    });
+                },
                 recurringExpenses: [],
                 session: null,
                 userProfile: { name: 'Guest', email: '' }
@@ -393,93 +518,22 @@ export const useSplittyStore = create<SplittyState>()(
                             category: newExpense.category,
                             split_type: newExpense.splitType,
                             split_details: newExpense.splitDetails,
+                            split_with: newExpense.splitWith, // Persist participants
                             created_by: session.user.id
                         }).then(({ error }) => {
                             if (error) {
                                 console.error("Expense sync error details:", error);
-                                console.log("Attempted payload:", {
-                                    description: newExpense.description,
-                                    amount: newExpense.amount,
-                                    payer_id: expense.payerId === 'self' ? session.user.id : null,
-                                    payer_name: payerName
-                                });
                             }
                         });
                     }
 
-                    const updatedFriends = [...state.friends];
-                    const updatedGroups = [...state.groups];
-
-                    // Determine participants (friends involved)
-                    let participants: string[] = [];
-                    if (expense.groupId) {
-                        const group = updatedGroups.find(g => g.id === expense.groupId);
-                        if (group) participants = [...group.members];
-                    } else if (expense.splitWith) {
-                        participants = [...expense.splitWith];
-                    }
-
-                    // Calculate amounts
-                    const amounts: { [id: string]: number } = {};
-
-                    if (expense.splitType === 'unequal' && expense.splitDetails) {
-                        Object.assign(amounts, expense.splitDetails);
-                    } else {
-                        const totalPeople = participants.length + 1; // Friends + Self
-                        const splitAmount = expense.amount / totalPeople;
-                        amounts['self'] = splitAmount;
-                        participants.forEach(p => amounts[p] = splitAmount);
-                    }
-
-                    if (expense.payerId === 'self') {
-                        // User Paid
-                        participants.forEach(friendId => {
-                            const amountOwed = amounts[friendId] || 0;
-                            if (amountOwed > 0) {
-                                const friendIndex = updatedFriends.findIndex(f => f.id === friendId);
-                                if (friendIndex !== -1) {
-                                    updatedFriends[friendIndex] = {
-                                        ...updatedFriends[friendIndex],
-                                        balance: updatedFriends[friendIndex].balance + amountOwed
-                                    };
-                                }
-                            }
-                        });
-
-                        if (expense.groupId) {
-                            const groupIndex = updatedGroups.findIndex(g => g.id === expense.groupId);
-                            if (groupIndex !== -1) {
-                                const ownShare = amounts['self'] || 0;
-                                updatedGroups[groupIndex] = {
-                                    ...updatedGroups[groupIndex],
-                                    balance: updatedGroups[groupIndex].balance + (expense.amount - ownShare)
-                                };
-                            }
-                        }
-
-                    } else {
-                        // Friend Paid
-                        const payerIndex = updatedFriends.findIndex(f => f.id === expense.payerId);
-                        if (payerIndex !== -1) {
-                            const myShare = amounts['self'] || 0;
-                            updatedFriends[payerIndex] = {
-                                ...updatedFriends[payerIndex],
-                                balance: updatedFriends[payerIndex].balance - myShare
-                            };
-
-                            if (expense.groupId) {
-                                const groupIndex = updatedGroups.findIndex(g => g.id === expense.groupId);
-                                if (groupIndex !== -1) {
-                                    updatedGroups[groupIndex].balance -= myShare;
-                                }
-                            }
-                        }
-                    }
+                    const updatedExpenses = [...state.expenses, newExpense];
+                    const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
 
                     return {
-                        expenses: [newExpense, ...state.expenses],
-                        friends: updatedFriends,
-                        groups: updatedGroups
+                        expenses: updatedExpenses,
+                        friends: newFriends,
+                        groups: newGroups
                     };
                 });
             },
@@ -489,79 +543,19 @@ export const useSplittyStore = create<SplittyState>()(
                     const expense = state.expenses.find(e => e.id === id);
                     if (!expense) return state;
 
-                    const updatedFriends = [...state.friends];
-                    const updatedGroups = [...state.groups];
-
-                    let participants: string[] = [];
-                    if (expense.groupId) {
-                        const group = updatedGroups.find(g => g.id === expense.groupId);
-                        if (group) participants = [...group.members];
-                    } else if (expense.splitWith) {
-                        participants = [...expense.splitWith];
-                    }
-
-                    const amounts: { [id: string]: number } = {};
-                    if (expense.splitType === 'unequal' && expense.splitDetails) {
-                        Object.assign(amounts, expense.splitDetails);
-                    } else {
-                        const totalPeople = participants.length + 1;
-                        const splitAmount = expense.amount / totalPeople;
-                        amounts['self'] = splitAmount;
-                        participants.forEach(p => amounts[p] = splitAmount);
-                    }
-
-                    if (expense.payerId === 'self') {
-                        participants.forEach(friendId => {
-                            const amountOwed = amounts[friendId] || 0;
-                            if (amountOwed > 0) {
-                                const friendIndex = updatedFriends.findIndex(f => f.id === friendId);
-                                if (friendIndex !== -1) {
-                                    updatedFriends[friendIndex] = {
-                                        ...updatedFriends[friendIndex],
-                                        balance: updatedFriends[friendIndex].balance - amountOwed
-                                    };
-                                }
-                            }
-                        });
-
-                        if (expense.groupId) {
-                            const groupIndex = updatedGroups.findIndex(g => g.id === expense.groupId);
-                            if (groupIndex !== -1) {
-                                const ownShare = amounts['self'] || 0;
-                                updatedGroups[groupIndex] = {
-                                    ...updatedGroups[groupIndex],
-                                    balance: updatedGroups[groupIndex].balance - (expense.amount - ownShare)
-                                };
-                            }
-                        }
-                    } else {
-                        const payerIndex = updatedFriends.findIndex(f => f.id === expense.payerId);
-                        if (payerIndex !== -1) {
-                            const myShare = amounts['self'] || 0;
-                            updatedFriends[payerIndex] = {
-                                ...updatedFriends[payerIndex],
-                                balance: updatedFriends[payerIndex].balance + myShare
-                            };
-
-                            if (expense.groupId) {
-                                const groupIndex = updatedGroups.findIndex(g => g.id === expense.groupId);
-                                if (groupIndex !== -1) {
-                                    updatedGroups[groupIndex].balance += myShare;
-                                }
-                            }
-                        }
-                    }
-
                     if (session?.user) {
                         supabase.from('expenses').delete().eq('id', id).then(({ error }) => {
                             if (error) console.error("Error deleting expense:", error);
                         });
                     }
 
+                    const remainingExpenses = state.expenses.filter(e => e.id !== id);
+                    const { friends: newFriends, groups: newGroups } = calculateBalances(remainingExpenses, state.friends, state.groups);
+
                     return {
-                        expenses: state.expenses.filter(e => e.id !== id),
-                        friends: updatedFriends,
-                        groups: updatedGroups
+                        expenses: remainingExpenses,
+                        friends: newFriends,
+                        groups: newGroups
                     };
                 });
             },
@@ -582,30 +576,23 @@ export const useSplittyStore = create<SplittyState>()(
 
                     if (session?.user) {
                         const payer = friends.find(f => f.id === updatedExpense.payerId);
-                        const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
-
+                        // ... (keep supabase update logic)
                         supabase.from('expenses').update({
-                            description: newExpenseFull.description,
-                            amount: newExpenseFull.amount,
-                            payer_id: updatedExpense.payerId === 'self' ? session.user.id : null,
-                            payer_name: payerName,
-                            group_id: newExpenseFull.groupId,
-                            category: newExpenseFull.category,
-                            split_type: newExpenseFull.splitType,
-                            split_details: newExpenseFull.splitDetails
-                        })
-                            .eq('id', id)
-                            .then(({ error }) => {
-                                if (error) console.error("Expense edit sync error:", error);
-                                fetchData(); // Refresh everything to ensure balances are correct
-                            });
+                            // ... fields
+                        }).eq('id', id).then(/*...*/);
                     }
 
+                    const updatedExpenses = state.expenses.map(e => e.id === id ? newExpenseFull : e);
+                    const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
+
                     return {
-                        expenses: state.expenses.map(e => e.id === id ? newExpenseFull : e)
+                        expenses: updatedExpenses,
+                        friends: newFriends,
+                        groups: newGroups
                     };
                 });
             },
+
             recurringExpenses: [],
             addRecurringExpense: (expense) => set((state) => {
                 const now = new Date();

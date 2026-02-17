@@ -9,7 +9,7 @@ import { getCategoryById } from '../../constants/Categories';
 
 export default function DashboardScreen() {
     const router = useRouter();
-    const { friends, expenses, deleteExpense, appearance, colors, formatCurrency } = useSplittyStore();
+    const { friends, expenses, deleteExpense, appearance, colors, formatCurrency, userProfile } = useSplittyStore();
     const isDark = appearance === 'dark';
 
     const owed = friends.reduce((acc, f) => f.balance > 0 ? acc + f.balance : acc, 0);
@@ -34,7 +34,7 @@ export default function DashboardScreen() {
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
             <ScrollView contentContainerStyle={styles.container}>
                 <View style={styles.header}>
-                    <Text style={[styles.greeting, { color: colors.textSecondary }]}>Hello, Manjunath!</Text>
+                    <Text style={[styles.greeting, { color: colors.textSecondary }]}>Hello, {userProfile.name || 'User'}!</Text>
                 </View>
 
                 <View style={styles.summaryRow}>

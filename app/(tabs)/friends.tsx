@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Themes, ThemeName, Colors } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
@@ -7,17 +7,71 @@ import { StyledInput } from '../../components/StyledInput';
 import { VibrantButton } from '../../components/VibrantButton';
 import { useSplittyStore } from '../../store/useSplittyStore';
 import { UserPlus, User, Trash2, Banknote } from 'lucide-react-native';
+import { supabase } from '../../lib/supabase';
 
 export default function FriendsScreen() {
     const router = useRouter();
     const { friends, addFriend, deleteFriend, appearance, colors, formatCurrency, settleUp } = useSplittyStore();
-    const [newName, setNewName] = useState('');
+    const [inputValue, setInputValue] = useState('');
+    const [loading, setLoading] = useState(false);
     const isDark = appearance === 'dark';
 
-    const handleAddFriend = () => {
-        if (newName.trim()) {
-            addFriend(newName.trim());
-            setNewName('');
+    const handleAddFriend = async () => {
+        if (!inputValue.trim()) return;
+        setLoading(true);
+
+        const input = inputValue.trim();
+        let foundUser: any = null;
+
+        try {
+            // Check if input looks like email
+            if (input.includes('@')) {
+                const { data, error } = await supabase.rpc('lookup_user_by_email', { search_email: input });
+                if (data) foundUser = data;
+            }
+            // Check if input looks like phone (digits > 9)
+            else if (input.replace(/\D/g, '').length >= 10) {
+                const { data, error } = await supabase.rpc('lookup_user_by_phone', { search_phone: input });
+                if (data) foundUser = data;
+            }
+
+            if (foundUser) {
+                Alert.alert(
+                    "User Found!",
+                    `Add ${foundUser.full_name || 'User'} (${input}) as a friend?`,
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                            text: "Add Friend",
+                            onPress: () => {
+                                addFriend(foundUser.full_name || input, foundUser.id);
+                                setInputValue('');
+                            }
+                        }
+                    ]
+                );
+            } else {
+                // Not found - Ask to add as local-only
+                Alert.alert(
+                    "User Not Found",
+                    `We couldn't find a registered user with ${input}. Add as a local-only friend?`,
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                            text: "Add Local Friend",
+                            onPress: () => {
+                                addFriend(input);
+                                setInputValue('');
+                            }
+                        }
+                    ]
+                );
+            }
+        } catch (err) {
+            console.log(err);
+            Alert.alert("Error", "Something went wrong searching for user.");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -66,15 +120,19 @@ export default function FriendsScreen() {
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
             <View style={styles.container}>
                 <GlassCard style={[styles.addCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Add New Friend</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Add Friend</Text>
+                    <Text style={{ color: colors.textSecondary, marginBottom: 8, fontSize: 13 }}>
+                        Search by email or phone to link real users. If not found, they'll be added locally.
+                    </Text>
                     <View style={styles.row}>
                         <View style={{ flex: 1 }}>
                             <StyledInput
-                                placeholder="Friend's Name"
-                                value={newName}
-                                onChangeText={setNewName}
+                                placeholder="Name, Email or Phone"
+                                value={inputValue}
+                                onChangeText={setInputValue}
                                 style={{ marginBottom: 0, backgroundColor: colors.inputBackground, color: colors.text }}
                                 placeholderTextColor={colors.textSecondary}
+                                autoCapitalize="none"
                             />
                         </View>
                         <View style={styles.addButtonWrapper}>
@@ -83,6 +141,7 @@ export default function FriendsScreen() {
                                 onPress={handleAddFriend}
                                 style={styles.smallAddButton}
                                 variant="primary"
+                                disabled={loading}
                             />
                             <View style={styles.plusIcon}>
                                 <UserPlus color="white" size={20} />
@@ -103,8 +162,12 @@ export default function FriendsScreen() {
                                 onPress={() => router.push({ pathname: '/friend-details/[id]', params: { id: item.id } })}
                             >
                                 <GlassCard style={[styles.friendCard, { backgroundColor: colors.surface }]}>
-                                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground }]}>
-                                        <User color={colors.textSecondary} size={24} />
+                                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground, overflow: 'hidden' }]}>
+                                        {item.avatarUrl ? (
+                                            <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} />
+                                        ) : (
+                                            <User color={colors.textSecondary} size={24} />
+                                        )}
                                     </View>
                                     <View style={styles.friendInfo}>
                                         <Text style={[styles.friendName, { color: colors.text }]}>{item.name}</Text>
@@ -211,6 +274,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 16,
+    },
+    avatarImage: {
+        width: '100%',
+        height: '100%',
     },
     friendInfo: {
         flex: 1,
