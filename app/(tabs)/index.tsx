@@ -63,7 +63,10 @@ export default function DashboardScreen() {
                 }
             >
                 <View style={styles.header}>
-                    <Text style={[styles.greeting, { color: colors.textSecondary }]}>Hello, {userProfile.name || 'User'}!</Text>
+                    <Text style={[styles.greeting, { color: colors.text }]}>Hello, {userProfile.name?.split(' ')[0] || 'Manjunath'}!</Text>
+                    <Text style={[styles.subGreeting, { color: colors.textSecondary }]}>
+                        {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'}
+                    </Text>
                 </View>
 
                 <View style={styles.summaryRow}>
@@ -173,11 +176,17 @@ const styles = StyleSheet.create({
     },
     header: {
         marginBottom: 30,
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
     greeting: {
+        fontSize: 32,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+    },
+    subGreeting: {
         fontSize: 16,
-        marginBottom: 8,
+        fontWeight: '500',
+        marginTop: 4,
     },
     title: {
         fontSize: 18,
