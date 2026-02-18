@@ -18,6 +18,11 @@ export default function DashboardScreen() {
     const owed = friends.reduce((acc, f) => f.balance > 0 ? acc + f.balance : acc, 0);
     const owe = friends.reduce((acc, f) => f.balance < 0 ? acc + Math.abs(f.balance) : acc, 0);
 
+    // Filter and Sort Expenses for Recent Activity
+    const recentExpenses = [...expenses]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, 5);
+
     const handleDelete = (id: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         Alert.alert(
@@ -92,8 +97,8 @@ export default function DashboardScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    {expenses.length > 0 ? (
-                        expenses.slice(0, 5).map(expense => (
+                    {recentExpenses.length > 0 ? (
+                        recentExpenses.map(expense => (
                             <TouchableOpacity
                                 key={expense.id}
                                 activeOpacity={0.7}

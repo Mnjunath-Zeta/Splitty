@@ -627,7 +627,7 @@ export const useSplittyStore = create<SplittyState>()(
                         });
                     }
 
-                    const updatedExpenses = [...state.expenses, newExpense];
+                    const updatedExpenses = [{ ...newExpense, createdBy: session?.user?.id }, ...state.expenses];
                     const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
 
                     return {
