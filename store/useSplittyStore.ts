@@ -97,7 +97,7 @@ interface SplittyState {
     expenses: Expense[];
     recurringExpenses: RecurringExpense[];
     addExpense: (expense: Omit<Expense, 'id' | 'date'>) => void;
-    deleteExpense: (id: string) => void;
+    deleteExpense: (id: string) => Promise<void>;
     editExpense: (id: string, updatedExpense: Omit<Expense, 'id' | 'date'>) => void;
     addRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'nextDueDate' | 'active'>) => void;
     deleteRecurringExpense: (id: string) => void;
@@ -634,26 +634,25 @@ export const useSplittyStore = create<SplittyState>()(
                     };
                 });
             },
-            deleteExpense: (id) => {
-                set((state) => {
-                    const { session } = get();
-                    const expense = state.expenses.find(e => e.id === id);
-                    if (!expense) return state;
+            deleteExpense: async (id) => {
+                const { session } = get();
+                const expense = get().expenses.find(e => e.id === id);
+                if (!expense) return;
 
-                    if (session?.user) {
-                        supabase.from('expenses').delete().eq('id', id).then(({ error }) => {
-                            if (error) console.error("Error deleting expense:", error);
-                        });
+                // Await the DB delete FIRST so any subsequent fetchData won't re-fetch it
+                if (session?.user) {
+                    const { error } = await supabase.from('expenses').delete().eq('id', id);
+                    if (error) {
+                        console.error("Error deleting expense:", error);
+                        return; // Don't update local state if DB delete failed
                     }
+                }
 
+                // Only update local state after DB confirms deletion
+                set((state) => {
                     const remainingExpenses = state.expenses.filter(e => e.id !== id);
                     const { friends: newFriends, groups: newGroups } = calculateBalances(remainingExpenses, state.friends, state.groups);
-
-                    return {
-                        expenses: remainingExpenses,
-                        friends: newFriends,
-                        groups: newGroups
-                    };
+                    return { expenses: remainingExpenses, friends: newFriends, groups: newGroups };
                 });
             },
             editExpense: (id, updatedExpense) => {
