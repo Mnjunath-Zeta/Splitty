@@ -7,6 +7,34 @@ import { ThemeName, AppearanceMode, AccentName, getThemeColors, ThemeColors } fr
 import { notificationService } from '../lib/NotificationService';
 import * as Crypto from 'expo-crypto';
 
+// --- ID Mapping Helpers ---
+const mapToRealId = (localId: string, friends: Friend[], sessionUserId: string): string => {
+    if (localId === 'self') return sessionUserId;
+    const friend = friends.find(f => f.id === localId);
+    return friend?.linkedUserId || localId; // Fallback to localId if not linked
+};
+
+const mapToLocalId = (realId: string, friends: Friend[], sessionUserId: string): string => {
+    if (realId === sessionUserId) return 'self';
+    const friend = friends.find(f => f.linkedUserId === realId);
+    return friend?.id || realId; // Fallback to realId if no local friend found
+};
+
+const mapIdsToReal = (ids: string[], friends: Friend[], sessionUserId: string): string[] => {
+    return ids.map(id => mapToRealId(id, friends, sessionUserId));
+};
+
+const mapSplitDetailsToReal = (details: Record<string, number>, friends: Friend[], sessionUserId: string): Record<string, number> => {
+    const realDetails: Record<string, number> = {};
+    Object.entries(details).forEach(([id, amount]) => {
+        const realId = mapToRealId(id, friends, sessionUserId);
+        realDetails[realId] = amount;
+    });
+    return realDetails;
+};
+
+// --------------------------
+
 export interface Friend {
     id: string;
     name: string;
@@ -185,35 +213,37 @@ export const useSplittyStore = create<SplittyState>()(
 
                 // Fallback: Populate from session metadata first
                 const meta = session.user.user_metadata;
-                set({
-                    userProfile: {
-                        name: meta?.full_name || meta?.name || 'New User',
-                        email: session.user.email || '',
-                        avatar: meta?.avatar_url || meta?.picture || '',
-                        phone: session.user.phone || ''
-                    }
-                });
+                let userProfile = {
+                    name: meta?.full_name || meta?.name || 'New User',
+                    email: session.user.email || '',
+                    avatar: meta?.avatar_url || meta?.picture || '',
+                    phone: session.user.phone || ''
+                };
 
                 // Parallelize fetching for better performance
-                const [profileRes, friendsRes, groupsRes, expensesRes] = await Promise.all([
+                const [profileRes, friendsRes, groupsRes, expensesRes, groupMembersRes] = await Promise.all([
                     supabase.from('profiles').select('*').eq('id', userId).single(),
                     supabase.from('friends').select('*').order('name'),
                     supabase.from('groups').select('*').order('created_at', { ascending: false }),
-                    supabase.from('expenses').select('*').order('date', { ascending: false })
+                    supabase.from('expenses').select('*').order('date', { ascending: false }),
+                    supabase.from('group_members').select('*')
                 ]);
 
                 // 1. Handle Profile
                 const { data: profileData, error: profileError } = profileRes;
                 if (!profileError && profileData) {
-                    set({
-                        userProfile: {
-                            name: profileData.full_name || meta?.full_name || meta?.name || 'New User',
-                            email: profileData.email || session.user.email || '',
-                            avatar: profileData.avatar_url || meta?.avatar_url || meta?.picture || '',
-                            phone: profileData.phone || ''
-                        }
-                    });
+                    userProfile = {
+                        name: profileData.full_name || meta?.full_name || meta?.name || 'New User',
+                        email: profileData.email || session.user.email || '',
+                        avatar: profileData.avatar_url || meta?.avatar_url || meta?.picture || '',
+                        phone: profileData.phone || ''
+                    };
                 }
+
+                // Initialize strict types
+                let loadedFriends: Friend[] = [];
+                let loadedGroups: Group[] = [];
+                let loadedExpenses: Expense[] = [];
 
                 // 2. Handle Friends
                 const { data: friendsData, error: friendsError } = friendsRes;
@@ -244,43 +274,99 @@ export const useSplittyStore = create<SplittyState>()(
                             }));
                         }
                     }
-
-                    set({ friends: mappedFriends });
+                    loadedFriends = mappedFriends;
                 }
+
+                // Hoist ID Mapping Helper
+                const friendMap = new Map<string, string>(); // Real UUID -> Local Friend ID
+                // friendsData is already available from line 247
+                if (!friendsError && friendsData) {
+                    friendsData.forEach((f: any) => {
+                        if (f.linked_user_id) {
+                            friendMap.set(f.linked_user_id, f.id);
+                        }
+                    });
+                }
+
+                const mapRealToLocal = (realId: string | null): string => {
+                    if (!realId) return 'self';
+                    if (realId === userId) return 'self';
+                    return friendMap.get(realId) || realId; // Fallback to realId
+                };
 
                 // 3. Handle Groups
                 const { data: groupsData, error: groupsError } = groupsRes;
+                const { data: groupMembersData, error: groupMembersError } = groupMembersRes;
+
                 if (!groupsError && groupsData) {
-                    const mappedGroups: Group[] = groupsData.map((g: any) => ({
-                        id: g.id,
-                        name: g.name,
-                        members: [], // We need to fetch members ideally, but for now empty
-                        balance: 0
-                    }));
-                    set({ groups: mappedGroups });
+                    const mappedGroups: Group[] = groupsData.map((g: any) => {
+                        // Get members for this group
+                        const members = groupMembersData
+                            ? groupMembersData
+                                .filter((gm: any) => gm.group_id === g.id)
+                                .map((gm: any) => mapRealToLocal(gm.user_id))
+                            : [];
+
+                        return {
+                            id: g.id,
+                            name: g.name,
+                            members: members,
+                            balance: 0
+                        };
+                    });
+                    loadedGroups = mappedGroups;
                 }
 
                 // 4. Handle Expenses
                 const { data: expensesData, error: expensesError } = expensesRes;
                 if (!expensesError && expensesData) {
-                    const mappedExpenses: Expense[] = expensesData.map((e: any) => ({
-                        id: e.id,
-                        description: e.description,
-                        amount: Number(e.amount),
-                        payerId: e.payer_id === userId ? 'self' : e.payer_id,
-                        groupId: e.group_id,
-                        splitWith: e.split_with || [], // Read participants
-                        date: e.date,
-                        splitType: e.split_type as any,
-                        splitDetails: e.split_details,
-                        category: e.category,
-                        isSettlement: false
-                    }));
+                    const mappedExpenses: Expense[] = expensesData.map((e: any) => {
+                        const localPayerId = mapRealToLocal(e.payer_id);
+
+                        // Map split_with
+                        const localSplitWith = (e.split_with || [])
+                            .map((realId: string) => mapRealToLocal(realId))
+                            .filter((id: string) => id !== 'self');
+
+                        // Map split_details
+                        const localSplitDetails: Record<string, number> = {};
+                        if (e.split_details) {
+                            Object.entries(e.split_details).forEach(([realId, amount]) => {
+                                localSplitDetails[mapRealToLocal(realId)] = Number(amount);
+                            });
+                        }
+
+                        return {
+                            id: e.id,
+                            description: e.description,
+                            amount: Number(e.amount),
+                            payerId: localPayerId,
+                            groupId: e.group_id,
+                            splitWith: localSplitWith,
+                            date: e.date,
+                            splitType: e.split_type as any,
+                            splitDetails: localSplitDetails,
+                            category: e.category,
+                            isSettlement: false
+                        };
+                    });
                     console.log(`✅ fetchData complete. Loaded ${mappedExpenses.length} expenses.`);
-                    set({ expenses: mappedExpenses });
+                    loadedExpenses = mappedExpenses;
                 } else if (expensesError) {
                     console.error('❌ fetchData expenses error:', expensesError);
                 }
+
+                // 5. Calculate Balances
+                // This ensures that friend balances are accurate based on fetched expense history
+                const { friends: balancedFriends, groups: balancedGroups } = calculateBalances(loadedExpenses, loadedFriends, loadedGroups);
+
+                // 6. Set Final State
+                set({
+                    userProfile,
+                    friends: balancedFriends,
+                    groups: balancedGroups,
+                    expenses: loadedExpenses
+                });
             },
             friends: [
                 { id: '1', name: 'Alwyn', balance: 450 },
@@ -507,18 +593,23 @@ export const useSplittyStore = create<SplittyState>()(
                         const payer = friends.find(f => f.id === expense.payerId);
                         const payerName = expense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
 
+                        // Map IDs to Real UUIDs for Supabase
+                        const realPayerId = mapToRealId(expense.payerId, friends, session.user.id);
+                        const realSplitWith = mapIdsToReal(newExpense.splitWith, friends, session.user.id);
+                        const realSplitDetails = newExpense.splitDetails ? mapSplitDetailsToReal(newExpense.splitDetails, friends, session.user.id) : {};
+
                         supabase.from('expenses').insert({
                             id: newExpense.id,
                             description: newExpense.description,
                             amount: newExpense.amount,
-                            payer_id: expense.payerId === 'self' ? session.user.id : null,
+                            payer_id: realPayerId === session.user.id ? session.user.id : (realPayerId || null),
                             payer_name: payerName,
                             group_id: newExpense.groupId,
                             date: newExpense.date,
                             category: newExpense.category,
                             split_type: newExpense.splitType,
-                            split_details: newExpense.splitDetails,
-                            split_with: newExpense.splitWith, // Persist participants
+                            split_details: realSplitDetails,
+                            split_with: realSplitWith, // Persist real UUIDs
                             created_by: session.user.id
                         }).then(({ error }) => {
                             if (error) {
@@ -576,10 +667,28 @@ export const useSplittyStore = create<SplittyState>()(
 
                     if (session?.user) {
                         const payer = friends.find(f => f.id === updatedExpense.payerId);
-                        // ... (keep supabase update logic)
+                        const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
+
+                        // Map IDs to Real UUIDs
+                        const realPayerId = mapToRealId(updatedExpense.payerId, friends, session.user.id);
+                        const realSplitWith = mapIdsToReal(newExpenseFull.splitWith || [], friends, session.user.id);
+                        const realSplitDetails = newExpenseFull.splitDetails ? mapSplitDetailsToReal(newExpenseFull.splitDetails, friends, session.user.id) : {};
+
                         supabase.from('expenses').update({
-                            // ... fields
-                        }).eq('id', id).then(/*...*/);
+                            description: newExpenseFull.description,
+                            amount: newExpenseFull.amount,
+                            payer_id: realPayerId === session.user.id ? session.user.id : (realPayerId || null),
+                            payer_name: payerName,
+                            group_id: newExpenseFull.groupId,
+                            category: newExpenseFull.category,
+                            split_type: newExpenseFull.splitType,
+                            split_details: realSplitDetails,
+                            split_with: realSplitWith
+                        })
+                            .eq('id', id)
+                            .then(({ error }) => {
+                                if (error) console.error("Expense edit sync error:", error);
+                            });
                     }
 
                     const updatedExpenses = state.expenses.map(e => e.id === id ? newExpenseFull : e);
@@ -652,9 +761,19 @@ export const useSplittyStore = create<SplittyState>()(
                 return count;
             },
             deleteFriend: (id) => {
-                set((state) => ({
-                    friends: state.friends.filter(f => f.id !== id)
-                }));
+                set((state) => {
+                    // Remove friend AND all expenses that only involve this friend
+                    // (keep expenses that involve other friends/groups too)
+                    const remainingExpenses = state.expenses.filter(e => {
+                        const isSoloPayer = e.payerId === id;
+                        const isOnlySplitWith = e.splitWith?.length === 1 && e.splitWith[0] === id && !e.groupId;
+                        // Remove expense only if it's exclusively between self and this friend
+                        return !(isSoloPayer && isOnlySplitWith) && !(isOnlySplitWith && e.payerId === 'self');
+                    });
+                    const remainingFriends = state.friends.filter(f => f.id !== id);
+                    const { friends: newFriends, groups: newGroups } = calculateBalances(remainingExpenses, remainingFriends, state.groups);
+                    return { friends: newFriends, groups: newGroups, expenses: remainingExpenses };
+                });
                 const { session } = get();
                 if (session?.user) {
                     supabase.from('friends').delete().eq('id', id).then(({ error }) => {
@@ -729,14 +848,16 @@ export const useSplittyStore = create<SplittyState>()(
                                 const deletedId = (payload.old as any)?.id;
                                 if (deletedId) {
                                     console.log('🗑️ Local removal of deleted expense:', deletedId);
-                                    set((state) => ({
-                                        expenses: state.expenses.filter(e => e.id !== deletedId)
-                                    }));
+                                    set((state) => {
+                                        const remaining = state.expenses.filter(e => e.id !== deletedId);
+                                        const { friends: newFriends, groups: newGroups } = calculateBalances(remaining, state.friends, state.groups);
+                                        return { expenses: remaining, friends: newFriends, groups: newGroups };
+                                    });
                                 }
                             }
 
-                            // Always refresh for any external change or DELETE
-                            if (payload.eventType === 'DELETE' || (payload.new as any)?.created_by !== session.user.id) {
+                            // Always refresh for external changes (INSERT/UPDATE/DELETE from others, or any DELETE)
+                            if (payload.eventType === 'DELETE' || payload.eventType === 'UPDATE' || (payload.new as any)?.created_by !== session.user.id) {
                                 console.log('🔄 Triggering fetchData due to event...');
                                 fetchData();
                             }

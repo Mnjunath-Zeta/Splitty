@@ -6,12 +6,12 @@ import { GlassCard } from '../../components/GlassCard';
 import { StyledInput } from '../../components/StyledInput';
 import { VibrantButton } from '../../components/VibrantButton';
 import { useSplittyStore } from '../../store/useSplittyStore';
-import { UserPlus, User, Trash2, Banknote } from 'lucide-react-native';
+import { UserPlus, User, Banknote } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 
 export default function FriendsScreen() {
     const router = useRouter();
-    const { friends, addFriend, deleteFriend, appearance, colors, formatCurrency, settleUp } = useSplittyStore();
+    const { friends, addFriend, appearance, colors, formatCurrency, settleUp } = useSplittyStore();
     const [inputValue, setInputValue] = useState('');
     const [loading, setLoading] = useState(false);
     const isDark = appearance === 'dark';
@@ -75,20 +75,7 @@ export default function FriendsScreen() {
         }
     };
 
-    const handleDelete = (id: string, name: string) => {
-        Alert.alert(
-            "Delete Friend",
-            `Are you sure you want to remove ${name}?`,
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: () => deleteFriend(id)
-                }
-            ]
-        );
-    };
+
 
     const handleSettleUp = (friend: { id: string, name: string, balance: number }) => {
         const amount = Math.abs(friend.balance);
@@ -188,13 +175,6 @@ export default function FriendsScreen() {
                                                 <Banknote size={20} color={colors.success} />
                                             </TouchableOpacity>
                                         )}
-                                        <TouchableOpacity
-                                            onPress={(e) => { e.stopPropagation(); handleDelete(item.id, item.name); }}
-                                            style={styles.actionButton}
-                                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                        >
-                                            <Trash2 size={20} color={colors.error} />
-                                        </TouchableOpacity>
                                     </View>
                                 </GlassCard>
                             </TouchableOpacity>

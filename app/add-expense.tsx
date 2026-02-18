@@ -41,7 +41,7 @@ export default function AddExpenseScreen() {
 
         if (type === 'individual') {
             // Self + All selected friends
-            return ['self', ...selectedIds];
+            return Array.from(new Set(['self', ...selectedIds]));
         } else {
             // Group (Single selection allowed for groups logic-wise typically, 
             // but if we supported multi-group splits it would be complex. Sticking to 1 group).
