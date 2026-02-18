@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, Alert, RefreshControl } from 'react-native';
 import { Themes, ThemeName } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { VibrantButton } from '../../components/VibrantButton';
@@ -6,16 +6,20 @@ import { useRouter } from 'expo-router';
 import { useSplittyStore } from '../../store/useSplittyStore';
 import { Trash2, Banknote } from 'lucide-react-native';
 import { getCategoryById } from '../../constants/Categories';
+import * as Haptics from 'expo-haptics';
+import { useState } from 'react';
 
 export default function DashboardScreen() {
     const router = useRouter();
-    const { friends, expenses, deleteExpense, appearance, colors, formatCurrency, userProfile } = useSplittyStore();
+    const { friends, expenses, deleteExpense, appearance, colors, formatCurrency, userProfile, fetchData } = useSplittyStore();
     const isDark = appearance === 'dark';
+    const [refreshing, setRefreshing] = useState(false);
 
     const owed = friends.reduce((acc, f) => f.balance > 0 ? acc + f.balance : acc, 0);
     const owe = friends.reduce((acc, f) => f.balance < 0 ? acc + Math.abs(f.balance) : acc, 0);
 
     const handleDelete = (id: string) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         Alert.alert(
             "Delete Expense",
             "Are you sure you want to delete this expense?",
@@ -30,9 +34,24 @@ export default function DashboardScreen() {
         );
     };
 
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await fetchData();
+        setRefreshing(false);
+    };
+
     return (
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-            <ScrollView contentContainerStyle={styles.container}>
+            <ScrollView
+                contentContainerStyle={styles.container}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        tintColor={colors.primary}
+                    />
+                }
+            >
                 <View style={styles.header}>
                     <Text style={[styles.greeting, { color: colors.textSecondary }]}>Hello, {userProfile.name || 'User'}!</Text>
                 </View>
@@ -51,7 +70,10 @@ export default function DashboardScreen() {
 
                 <VibrantButton
                     title="Add New Expense"
-                    onPress={() => router.push('/add-expense')}
+                    onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        router.push('/add-expense');
+                    }}
                     style={styles.addButton}
                 />
 
@@ -77,7 +99,11 @@ export default function DashboardScreen() {
                                 activeOpacity={0.7}
                                 onPress={() => router.push({ pathname: '/add-expense', params: { id: expense.id } })}
                             >
-                                <GlassCard style={[styles.activityItem, { backgroundColor: colors.surface }]}>
+                                <GlassCard style={[
+                                    styles.activityItem,
+                                    { backgroundColor: colors.surface },
+                                    { borderLeftWidth: 3, borderLeftColor: expense.isSettlement ? colors.success : getCategoryById(expense.category).color }
+                                ]}>
                                     <View style={[
                                         styles.categoryIcon,
                                         { backgroundColor: expense.isSettlement ? colors.success + '20' : getCategoryById(expense.category).color + '20' }

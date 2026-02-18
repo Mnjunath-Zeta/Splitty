@@ -3,9 +3,11 @@ import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Alert, ScrollVi
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../../store/useSplittyStore';
 import { GlassCard } from '../../components/GlassCard';
-import { ArrowLeft, User, Banknote, Trash2, Users, Mail, Phone, ChevronRight } from 'lucide-react-native';
+import { ArrowLeft, Banknote, Trash2, Users, Mail, Phone, ChevronRight } from 'lucide-react-native';
 import { getCategoryById } from '../../constants/Categories';
 import { supabase } from '../../lib/supabase';
+import { InitialsAvatar } from '../../components/InitialsAvatar';
+import * as Haptics from 'expo-haptics';
 
 interface LinkedProfile {
     email?: string;
@@ -74,6 +76,7 @@ export default function FriendDetailsScreen() {
     };
 
     const handleDeleteExpense = (expenseId: string) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         Alert.alert(
             "Delete Expense",
             "Are you sure you want to delete this expense?",
@@ -85,6 +88,7 @@ export default function FriendDetailsScreen() {
     };
 
     const handleDeleteFriend = () => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         Alert.alert(
             "Remove Friend",
             `Are you sure you want to remove ${friend.name}? Their shared expenses will also be removed from your activity.`,
@@ -123,13 +127,11 @@ export default function FriendDetailsScreen() {
 
                 {/* Profile Card */}
                 <GlassCard style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground, overflow: 'hidden' }]}>
-                        {friend.avatarUrl ? (
-                            <Image source={{ uri: friend.avatarUrl }} style={styles.avatarImage} />
-                        ) : (
-                            <User size={32} color={colors.primary} />
-                        )}
-                    </View>
+                    <InitialsAvatar
+                        name={friend.name}
+                        avatarUrl={friend.avatarUrl}
+                        size={72}
+                    />
                     <Text style={[styles.friendName, { color: colors.text }]}>{friend.name}</Text>
 
                     {isLinked && (
@@ -199,7 +201,11 @@ export default function FriendDetailsScreen() {
                                 activeOpacity={0.7}
                                 onPress={() => router.push({ pathname: '/add-expense', params: { id: expense.id } })}
                             >
-                                <GlassCard style={[styles.activityItem, { backgroundColor: colors.surface }]}>
+                                <GlassCard style={[
+                                    styles.activityItem,
+                                    { backgroundColor: colors.surface },
+                                    { borderLeftWidth: 3, borderLeftColor: expense.isSettlement ? colors.success : getCategoryById(expense.category).color }
+                                ]}>
                                     <View style={[
                                         styles.categoryIcon,
                                         { backgroundColor: expense.isSettlement ? colors.success + '20' : getCategoryById(expense.category).color + '20' }

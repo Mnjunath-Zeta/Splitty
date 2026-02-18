@@ -1,20 +1,29 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, Image, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Themes, ThemeName, Colors } from '../../constants/Colors';
 import { GlassCard } from '../../components/GlassCard';
 import { StyledInput } from '../../components/StyledInput';
 import { VibrantButton } from '../../components/VibrantButton';
 import { useSplittyStore } from '../../store/useSplittyStore';
-import { UserPlus, User, Banknote } from 'lucide-react-native';
+import { UserPlus, Banknote } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
+import { InitialsAvatar } from '../../components/InitialsAvatar';
+import * as Haptics from 'expo-haptics';
 
 export default function FriendsScreen() {
     const router = useRouter();
-    const { friends, addFriend, appearance, colors, formatCurrency, settleUp } = useSplittyStore();
+    const { friends, addFriend, appearance, colors, formatCurrency, settleUp, fetchData } = useSplittyStore();
     const [inputValue, setInputValue] = useState('');
     const [loading, setLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const isDark = appearance === 'dark';
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await fetchData();
+        setRefreshing(false);
+    };
 
     const handleAddFriend = async () => {
         if (!inputValue.trim()) return;
@@ -149,13 +158,11 @@ export default function FriendsScreen() {
                                 onPress={() => router.push({ pathname: '/friend-details/[id]', params: { id: item.id } })}
                             >
                                 <GlassCard style={[styles.friendCard, { backgroundColor: colors.surface }]}>
-                                    <View style={[styles.avatar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : colors.inputBackground, overflow: 'hidden' }]}>
-                                        {item.avatarUrl ? (
-                                            <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} />
-                                        ) : (
-                                            <User color={colors.textSecondary} size={24} />
-                                        )}
-                                    </View>
+                                    <InitialsAvatar
+                                        name={item.name}
+                                        avatarUrl={item.avatarUrl}
+                                        size={44}
+                                    />
                                     <View style={styles.friendInfo}>
                                         <Text style={[styles.friendName, { color: colors.text }]}>{item.name}</Text>
                                         <Text style={[
@@ -168,7 +175,11 @@ export default function FriendsScreen() {
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                         {Math.abs(item.balance) > 0.01 && (
                                             <TouchableOpacity
-                                                onPress={(e) => { e.stopPropagation(); handleSettleUp(item); }}
+                                                onPress={(e) => {
+                                                    e.stopPropagation();
+                                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                                    handleSettleUp(item);
+                                                }}
                                                 style={styles.actionButton}
                                                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                                             >
@@ -183,6 +194,13 @@ export default function FriendsScreen() {
                             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No friends added yet.</Text>
                         }
                         contentContainerStyle={{ paddingBottom: 20 }}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={handleRefresh}
+                                tintColor={colors.primary}
+                            />
+                        }
                     />
                 </View>
             </View >

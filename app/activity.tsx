@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, SafeAreaView, TouchableOpacity, Alert, TextInput, RefreshControl } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../store/useSplittyStore';
 import { Themes, ThemeName, Colors } from '../constants/Colors';
 import { GlassCard } from '../components/GlassCard';
 import { ArrowLeft, Search, Trash2, Banknote, Users } from 'lucide-react-native';
 import { getCategoryById } from '../constants/Categories';
+import * as Haptics from 'expo-haptics';
 
 export default function ActivityScreen() {
     const router = useRouter();
-    const { expenses, friends, groups, appearance, colors, formatCurrency, deleteExpense } = useSplittyStore();
+    const { expenses, friends, groups, appearance, colors, formatCurrency, deleteExpense, fetchData } = useSplittyStore();
     const [searchQuery, setSearchQuery] = useState('');
+    const [refreshing, setRefreshing] = useState(false);
     const isDark = appearance === 'dark';
 
     // Filter and Sort Expenses
@@ -38,6 +40,7 @@ export default function ActivityScreen() {
     };
 
     const handleDelete = (id: string) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         Alert.alert(
             "Delete Expense",
             "Are you sure you want to delete this expense?",
@@ -50,6 +53,12 @@ export default function ActivityScreen() {
                 }
             ]
         );
+    };
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await fetchData();
+        setRefreshing(false);
     };
 
     return (
@@ -81,12 +90,23 @@ export default function ActivityScreen() {
                 data={filteredExpenses}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContainer}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        tintColor={colors.primary}
+                    />
+                }
                 renderItem={({ item }) => (
                     <TouchableOpacity
                         activeOpacity={0.7}
                         onPress={() => router.push({ pathname: '/add-expense', params: { id: item.id } })}
                     >
-                        <GlassCard style={[styles.activityItem, { backgroundColor: colors.surface }]}>
+                        <GlassCard style={[
+                            styles.activityItem,
+                            { backgroundColor: colors.surface },
+                            { borderLeftWidth: 3, borderLeftColor: item.isSettlement ? colors.success : getCategoryById(item.category).color }
+                        ]}>
                             <View style={[
                                 styles.categoryIcon,
                                 { backgroundColor: item.isSettlement ? colors.success + '20' : getCategoryById(item.category).color + '20' }
