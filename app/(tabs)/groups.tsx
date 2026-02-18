@@ -47,12 +47,12 @@ export default function GroupsScreen() {
 
     const handleDelete = (id: string, name: string) => {
         Alert.alert(
-            "Delete Group",
-            `Are you sure you want to delete ${name}?`,
+            "Archive Group",
+            `This will hide "${name}" from your view. Other members will still see it and all shared expenses will be preserved.`,
             [
                 { text: "Cancel", style: "cancel" },
                 {
-                    text: "Delete",
+                    text: "Archive",
                     style: "destructive",
                     onPress: () => deleteGroup(id)
                 }

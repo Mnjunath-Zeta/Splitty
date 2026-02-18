@@ -299,21 +299,27 @@ export const useSplittyStore = create<SplittyState>()(
                 const { data: groupMembersData, error: groupMembersError } = groupMembersRes;
 
                 if (!groupsError && groupsData) {
-                    const mappedGroups: Group[] = groupsData.map((g: any) => {
-                        // Get members for this group
-                        const members = groupMembersData
-                            ? groupMembersData
-                                .filter((gm: any) => gm.group_id === g.id)
-                                .map((gm: any) => mapRealToLocal(gm.user_id))
-                            : [];
+                    const mappedGroups: Group[] = groupsData
+                        .filter((g: any) => {
+                            // Soft delete: hide groups the current user has archived
+                            const archivedBy: string[] = g.archived_by || [];
+                            return !archivedBy.includes(userId);
+                        })
+                        .map((g: any) => {
+                            // Get members for this group
+                            const members = groupMembersData
+                                ? groupMembersData
+                                    .filter((gm: any) => gm.group_id === g.id)
+                                    .map((gm: any) => mapRealToLocal(gm.user_id))
+                                : [];
 
-                        return {
-                            id: g.id,
-                            name: g.name,
-                            members: members,
-                            balance: 0
-                        };
-                    });
+                            return {
+                                id: g.id,
+                                name: g.name,
+                                members: members,
+                                balance: 0
+                            };
+                        });
                     loadedGroups = mappedGroups;
                 }
 
@@ -782,14 +788,31 @@ export const useSplittyStore = create<SplittyState>()(
                 }
             },
             deleteGroup: (id) => {
+                // Soft delete: hide the group for the current user by appending their ID to archived_by.
+                // Other members continue to see the group normally.
                 set((state) => ({
                     groups: state.groups.filter(g => g.id !== id)
                 }));
                 const { session } = get();
                 if (session?.user) {
-                    supabase.from('groups').delete().eq('id', id).then(({ error }) => {
-                        if (error) console.error("Error deleting group:", error);
-                    });
+                    // Fetch current archived_by, append current user, then update
+                    supabase
+                        .from('groups')
+                        .select('archived_by')
+                        .eq('id', id)
+                        .single()
+                        .then(({ data }) => {
+                            const current: string[] = data?.archived_by || [];
+                            if (!current.includes(session.user.id)) {
+                                supabase
+                                    .from('groups')
+                                    .update({ archived_by: [...current, session.user.id] })
+                                    .eq('id', id)
+                                    .then(({ error }) => {
+                                        if (error) console.error('Error archiving group:', error);
+                                    });
+                            }
+                        });
                 }
             },
             editGroup: (id, name, members) => {
@@ -883,6 +906,20 @@ export const useSplittyStore = create<SplittyState>()(
                                     }));
                                 }
                             }
+                            fetchData();
+                        }
+                    )
+                    .on(
+                        'postgres_changes',
+                        {
+                            event: 'UPDATE',
+                            schema: 'public',
+                            table: 'groups',
+                        },
+                        (payload) => {
+                            // Re-fetch when archived_by changes so the group disappears
+                            // for the archiving user and stays for others
+                            console.log('🔔 Real-time Group update:', (payload.new as any)?.id);
                             fetchData();
                         }
                     )
