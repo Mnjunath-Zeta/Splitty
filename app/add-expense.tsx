@@ -253,7 +253,7 @@ export default function AddExpenseScreen() {
 
                 <FriendSelector
                     type={type}
-                    friends={friends.filter(f => !!f.linkedUserId)}
+                    friends={friends}
                     groups={groups}
                     selectedIds={selectedIds}
                     onToggle={toggleSelection}

@@ -89,6 +89,21 @@ export default function SettingsScreen() {
         router.push('/settle-up');
     };
 
+    const handleSignOut = () => {
+        Alert.alert(
+            "Sign Out",
+            "Are you sure you want to sign out?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Sign Out",
+                    style: "destructive",
+                    onPress: signOut
+                }
+            ]
+        );
+    };
+
     const renderSettingItem = (icon: React.ReactNode, label: string, rightElement: React.ReactNode, onPress?: () => void) => (
         <TouchableOpacity
             style={styles.settingItem}
@@ -227,7 +242,7 @@ export default function SettingsScreen() {
                             <LogOut size={20} color={colors.error} />,
                             "Sign Out",
                             <ChevronRight size={20} color={colors.textSecondary} />,
-                            signOut
+                            handleSignOut
                         )}
                     </GlassCard>
                 </View>

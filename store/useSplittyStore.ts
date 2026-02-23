@@ -128,6 +128,7 @@ interface SplittyState {
     deleteRecurringExpense: (id: string) => void;
     checkRecurringExpenses: () => number; // Returns number of created expenses
     addFriend: (name: string, linkedUserId?: string) => void;
+    editFriend: (id: string, name: string, avatarUrl?: string) => Promise<void>;
     addGroup: (name: string, members: string[]) => void;
     deleteFriend: (id: string) => void;
     deleteGroup: (id: string) => void;
@@ -296,6 +297,7 @@ export const useSplittyStore = create<SplittyState>()(
                         id: f.id,
                         name: f.name,
                         linkedUserId: f.linked_user_id,
+                        avatarUrl: f.avatar_url, // Read the local DB avatar_url
                         balance: 0
                     }));
 
@@ -314,7 +316,8 @@ export const useSplittyStore = create<SplittyState>()(
                             const avatarMap = new Map(linkedProfiles.map((p: any) => [p.id, p.avatar_url]));
                             mappedFriends = mappedFriends.map(f => ({
                                 ...f,
-                                avatarUrl: f.linkedUserId ? avatarMap.get(f.linkedUserId) : undefined
+                                // Use linked profile avatar if it exists, otherwise fallback to local avatar_url
+                                avatarUrl: f.linkedUserId ? (avatarMap.get(f.linkedUserId) || f.avatarUrl) : f.avatarUrl
                             }));
                         }
                     }
@@ -477,6 +480,29 @@ export const useSplittyStore = create<SplittyState>()(
                     });
                 }
             },
+            editFriend: async (id: string, name: string, avatarUrl?: string) => {
+                const { session } = get();
+                if (!session?.user) throw new Error("Not authenticated");
+
+                // Optmistic UI Update
+                set((state) => ({
+                    friends: state.friends.map(f =>
+                        f.id === id ? { ...f, name, avatarUrl } : f
+                    )
+                }));
+
+                const { error } = await supabase.from('friends')
+                    .update({ name, avatar_url: avatarUrl || null })
+                    .eq('id', id)
+                    .eq('user_id', session.user.id);
+
+                if (error) {
+                    console.error("Edit friend sync error:", error);
+                    // Revert on failure
+                    get().fetchData();
+                    throw new Error(error.message);
+                }
+            },
             addGroup: (name, members) => {
                 const groupId = Crypto.randomUUID();
                 set((state) => ({
@@ -528,57 +554,117 @@ export const useSplittyStore = create<SplittyState>()(
                 friends: [],
                 groups: [],
                 expenses: [],
-                editExpense: (id, updatedExpense) => {
-                    console.log('📝 editExpense called', id, updatedExpense.description);
-                    set((state) => {
-                        const { session, friends, userProfile, fetchData } = get();
-                        const oldExpense = state.expenses.find(e => e.id === id);
-                        if (!oldExpense) return state;
-
-                        const newExpenseFull = {
-                            ...updatedExpense,
-                            id,
-                            date: oldExpense.date,
-                            splitType: updatedExpense.splitType || 'equal',
-                            splitDetails: updatedExpense.splitDetails || {}
-                        };
-
-                        if (session?.user) {
-                            const payer = friends.find(f => f.id === updatedExpense.payerId);
-                            const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
-
-                            supabase.from('expenses').update({
-                                description: newExpenseFull.description,
-                                amount: newExpenseFull.amount,
-                                payer_id: updatedExpense.payerId === 'self' ? session.user.id : null,
-                                payer_name: payerName,
-                                group_id: newExpenseFull.groupId,
-                                category: newExpenseFull.category,
-                                split_type: newExpenseFull.splitType,
-                                split_details: newExpenseFull.splitDetails,
-                                split_with: newExpenseFull.splitWith
-                            })
-                                .eq('id', id)
-                                .then(({ error }) => {
-                                    if (error) console.error("Expense edit sync error:", error);
-                                    // fetchData(); // Optional: Refresh if needed, but manual update should be enough
-                                });
-                        }
-
-                        const updatedExpenses = state.expenses.map(e => e.id === id ? newExpenseFull : e);
-                        const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
-
-                        return {
-                            expenses: updatedExpenses,
-                            friends: newFriends,
-                            groups: newGroups
-                        };
-                    });
-                },
                 recurringExpenses: [],
                 session: null,
                 userProfile: { name: 'Guest', email: '' }
             })),
+            editExpense: (id, updatedExpense) => {
+                console.log('📝 editExpense called:', updatedExpense.description);
+                set((state) => {
+                    const { session, friends, userProfile, fetchData } = get();
+                    const oldExpense = state.expenses.find(e => e.id === id);
+                    if (!oldExpense) return state;
+
+                    const newExpenseFull = {
+                        ...updatedExpense,
+                        id,
+                        date: oldExpense.date,
+                        splitType: updatedExpense.splitType || 'equal',
+                        splitDetails: updatedExpense.splitDetails || {}
+                    };
+
+                    if (session?.user) {
+                        const payer = friends.find(f => f.id === updatedExpense.payerId);
+                        const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
+
+                        // Map IDs to Real UUIDs for Supabase
+                        const realPayerId = mapToRealId(updatedExpense.payerId, friends, session.user.id);
+                        const realSplitWith = mapIdsToReal(newExpenseFull.splitWith, friends, session.user.id);
+                        const realSplitDetails = newExpenseFull.splitDetails ? mapSplitDetailsToReal(newExpenseFull.splitDetails, friends, session.user.id) : {};
+
+                        // 1. Update main expenses table
+                        supabase.from('expenses').update({
+                            description: newExpenseFull.description,
+                            amount: newExpenseFull.amount,
+                            payer_id: realPayerId === session.user.id ? session.user.id : (realPayerId || null),
+                            payer_name: payerName,
+                            group_id: newExpenseFull.groupId,
+                            category: newExpenseFull.category,
+                            split_type: newExpenseFull.splitType,
+                            split_details: realSplitDetails,
+                            split_with: realSplitWith
+                        })
+                            .eq('id', id)
+                            .then(async ({ error }) => {
+                                if (error) {
+                                    console.error("Expense edit sync error:", error);
+                                } else {
+                                    // 2. Dual Write: Update expense_participants
+                                    // First delete existing participants for this expense
+                                    const { error: delError } = await supabase
+                                        .from('expense_participants')
+                                        .delete()
+                                        .eq('expense_id', id);
+
+                                    if (!delError) {
+                                        const participantsToInsert = [];
+                                        const allParticipants = new Set([...realSplitWith, realPayerId]);
+                                        if (realPayerId === session.user.id) allParticipants.add(session.user.id);
+
+                                        for (const realId of allParticipants) {
+                                            let amount = 0;
+                                            if (newExpenseFull.splitType === 'unequal') {
+                                                amount = realSplitDetails[realId] || 0;
+                                            } else {
+                                                const count = (newExpenseFull.splitWith?.length || 0) + 1;
+                                                amount = Number((newExpenseFull.amount / count).toFixed(2));
+                                            }
+
+                                            let pId = null;
+                                            let fId = null;
+
+                                            if (realId === session.user.id) {
+                                                pId = realId;
+                                            } else {
+                                                const friendObj = friends.find(f => f.linkedUserId === realId);
+                                                if (friendObj) {
+                                                    pId = realId;
+                                                } else {
+                                                    const localFriend = friends.find(f => f.id === realId);
+                                                    if (localFriend) {
+                                                        fId = realId;
+                                                    } else {
+                                                        pId = realId;
+                                                    }
+                                                }
+                                            }
+
+                                            participantsToInsert.push({
+                                                expense_id: id,
+                                                profile_id: pId,
+                                                friend_id: fId,
+                                                amount: amount
+                                            });
+                                        }
+
+                                        if (participantsToInsert.length > 0) {
+                                            await supabase.from('expense_participants').insert(participantsToInsert);
+                                        }
+                                    }
+                                }
+                            });
+                    }
+
+                    const updatedExpenses = state.expenses.map(e => e.id === id ? newExpenseFull : e);
+                    const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
+
+                    return {
+                        expenses: updatedExpenses,
+                        friends: newFriends,
+                        groups: newGroups
+                    };
+                });
+            },
             theme: 'light',
             appearance: 'light',
             accent: 'classic',
@@ -848,112 +934,6 @@ export const useSplittyStore = create<SplittyState>()(
                     return { expenses: remainingExpenses, friends: newFriends, groups: newGroups };
                 });
             },
-            editExpense: (id, updatedExpense) => {
-                console.log('📝 editExpense called', id, updatedExpense.description);
-                set((state) => {
-                    const { session, friends, userProfile, fetchData } = get();
-                    const oldExpense = state.expenses.find(e => e.id === id);
-                    if (!oldExpense) return state;
-
-                    const payer = friends.find(f => f.id === updatedExpense.payerId);
-                    const payerName = updatedExpense.payerId === 'self' ? (userProfile.name || 'You') : (payer?.name || 'Someone');
-
-                    const newExpenseFull = {
-                        ...updatedExpense,
-                        id,
-                        date: oldExpense.date,
-                        splitType: updatedExpense.splitType || 'equal',
-                        splitDetails: updatedExpense.splitDetails || {},
-                        payerName: payerName
-                    };
-
-                    if (session?.user) {
-                        // payerName already calculated above
-
-                        // Map IDs to Real UUIDs
-                        const realPayerId = mapToRealId(updatedExpense.payerId, friends, session.user.id);
-                        const realSplitWith = mapIdsToReal(newExpenseFull.splitWith || [], friends, session.user.id);
-                        const realSplitDetails = newExpenseFull.splitDetails ? mapSplitDetailsToReal(newExpenseFull.splitDetails, friends, session.user.id) : {};
-
-                        supabase.from('expenses').update({
-                            description: newExpenseFull.description,
-                            amount: newExpenseFull.amount,
-                            payer_id: realPayerId === session.user.id ? session.user.id : (realPayerId || null),
-                            payer_name: payerName,
-                            group_id: newExpenseFull.groupId,
-                            category: newExpenseFull.category,
-                            split_type: newExpenseFull.splitType,
-                            split_details: realSplitDetails,
-                            split_with: realSplitWith
-                        })
-                            .eq('id', id)
-                            .then(async ({ error }) => {
-                                if (error) console.error("Expense edit sync error:", error);
-                                else {
-                                    // DUAL WRITE: Update participants
-                                    // Simplest strategy: Delete all for this expense and re-insert
-                                    await supabase.from('expense_participants').delete().eq('expense_id', id);
-
-                                    const participantsToInsert = [];
-                                    const allParticipants = new Set([...realSplitWith, realPayerId]);
-                                    if (realPayerId === session.user.id) allParticipants.add(session.user.id);
-
-                                    // ... exact same logic as Add Expense ...
-                                    // DRY refactor in future. For now, duplication for safety.
-
-                                    for (const realId of allParticipants) {
-                                        let amount = 0;
-                                        if (newExpenseFull.splitType === 'unequal') {
-                                            amount = realSplitDetails[realId] || 0;
-                                        } else {
-                                            const count = (newExpenseFull.splitWith?.length || 0) + 1;
-                                            amount = Number((newExpenseFull.amount / count).toFixed(2));
-                                        }
-
-                                        let pId = null;
-                                        let fId = null;
-
-                                        if (realId === session.user.id) {
-                                            pId = realId;
-                                        } else {
-                                            const friendObj = friends.find(f => f.linkedUserId === realId);
-                                            if (friendObj) {
-                                                pId = realId;
-                                            } else {
-                                                const localFriend = friends.find(f => f.id === realId);
-                                                if (localFriend) {
-                                                    fId = realId;
-                                                } else {
-                                                    pId = realId;
-                                                }
-                                            }
-                                        }
-
-                                        participantsToInsert.push({
-                                            expense_id: id,
-                                            profile_id: pId,
-                                            friend_id: fId,
-                                            amount: amount
-                                        });
-                                    }
-
-                                    if (participantsToInsert.length > 0) {
-                                        await supabase.from('expense_participants').insert(participantsToInsert);
-                                    }
-                                }
-                            });
-                    }
-
-                    const updatedExpenses = state.expenses.map(e => e.id === id ? newExpenseFull : e);
-                    const { friends: newFriends, groups: newGroups } = calculateBalances(updatedExpenses, state.friends, state.groups);
-
-                    return {
-                        expenses: updatedExpenses,
-                        friends: newFriends,
-                        groups: newGroups
-                    };
-                });
-            },
 
             recurringExpenses: [],
             addRecurringExpense: (expense) => set((state) => {
@@ -1158,15 +1138,24 @@ export const useSplittyStore = create<SplittyState>()(
                                     }));
                                 }
                             }
-                            // Only fetchData if it's an event we didn't initiate or if we need fresh totals
-                            // Since friends table usually doesn't have 'created_by', we check 'user_id'
-                            const isMyFriend = (payload.new as any)?.user_id === session.user.id || (payload.old as any)?.user_id === session.user.id;
+                            const isMyFriend = (eventData)?.user_id === session.user.id;
 
-                            if (isMyFriend && payload.eventType !== 'DELETE') {
-                                // For self-initiated updates, we usually have the state, but triggers on DB 
-                                // might have updated balances, so fetchData is sometimes needed.
-                                // However, we skip it if we just did a delete (handled locally).
-                                fetchData();
+                            if (isMyFriend) {
+                                if (payload.eventType === 'UPDATE') {
+                                    const updatedData = payload.new as any;
+                                    set((state) => ({
+                                        friends: state.friends.map(f =>
+                                            f.id === updatedData.id ? {
+                                                ...f,
+                                                name: updatedData.name,
+                                                avatarUrl: updatedData.linked_user_id ? f.avatarUrl : updatedData.avatar_url
+                                            } : f
+                                        )
+                                    }));
+                                    // Skip fetchData for simple updates to avoid race conditions with UI
+                                } else if (payload.eventType === 'INSERT') {
+                                    fetchData();
+                                }
                             }
                         }
                     )

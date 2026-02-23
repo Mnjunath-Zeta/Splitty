@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Alert, ScrollView, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Alert, ScrollView, Image, Linking, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSplittyStore } from '../../store/useSplittyStore';
 import { GlassCard } from '../../components/GlassCard';
-import { ArrowLeft, Banknote, Trash2, Users, Mail, Phone, ChevronRight } from 'lucide-react-native';
+import { ArrowLeft, Banknote, Trash2, Users, Mail, Phone, ChevronRight, Edit2, X, Camera } from 'lucide-react-native';
 import { getCategoryById } from '../../constants/Categories';
 import { supabase } from '../../lib/supabase';
 import { InitialsAvatar } from '../../components/InitialsAvatar';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 interface LinkedProfile {
     email?: string;
@@ -24,6 +25,12 @@ export default function FriendDetailsScreen() {
 
     const friend = friends.find(f => f.id === id);
     const [linkedProfile, setLinkedProfile] = useState<LinkedProfile | null>(null);
+
+    // Edit Modal State
+    const [isEditing, setIsEditing] = useState(false);
+    const [editName, setEditName] = useState('');
+    const [editAvatarUrl, setEditAvatarUrl] = useState<string | undefined>(undefined);
+    const [isSaving, setIsSaving] = useState(false);
 
     // Fetch linked user's profile (email/phone) if they are a registered user
     useEffect(() => {
@@ -110,6 +117,55 @@ export default function FriendDetailsScreen() {
     const displayPhone = linkedProfile?.phone;
     const isLinked = !!friend.linkedUserId;
 
+    const openEditModal = () => {
+        setEditName(friend.name);
+        setEditAvatarUrl(friend.avatarUrl);
+        setIsEditing(true);
+    };
+
+    const handlePickImage = async () => {
+        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permissionResult.granted === false) {
+            Alert.alert('Permission to access camera roll is required!');
+            return;
+        }
+
+        const pickerResult = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.5,
+        });
+
+        if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
+            setEditAvatarUrl(pickerResult.assets[0].uri);
+        }
+    };
+
+    const handleSaveProfile = async () => {
+        if (!editName.trim()) {
+            Alert.alert("Error", "Name cannot be empty");
+            return;
+        }
+        setIsSaving(true);
+        try {
+            // For a robust implementation, we'd upload `editAvatarUrl` to Supabase Storage if it's a local file URI (e.g. file://...)
+            // Since there's no storage bucket mentioned in the prompt, we are temporarily relying on the local base64/file URI, 
+            // which works perfectly offline but won't be visible to others.
+            // If the user wants a true cloud upload, we would upload to a bucket and pass the public URL here.
+
+            // Call the store action and await to catch DB errors
+            await useSplittyStore.getState().editFriend(friend.id, editName.trim(), editAvatarUrl);
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setIsEditing(false);
+        } catch (e: any) {
+            Alert.alert("Error saving profile", e.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     return (
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
             <Stack.Screen options={{ headerShown: false }} />
@@ -127,12 +183,23 @@ export default function FriendDetailsScreen() {
 
                 {/* Profile Card */}
                 <GlassCard style={[styles.summaryCard, { backgroundColor: colors.surface }]}>
-                    <InitialsAvatar
-                        name={friend.name}
-                        avatarUrl={friend.avatarUrl}
-                        size={72}
-                    />
-                    <Text style={[styles.friendName, { color: colors.text }]}>{friend.name}</Text>
+                    <View style={styles.avatarEditContainer}>
+                        <InitialsAvatar
+                            name={friend.name}
+                            avatarUrl={friend.avatarUrl}
+                            size={72}
+                            isLocal={!isLinked}
+                        />
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={[styles.friendName, { color: colors.text, marginBottom: 0 }]}>{friend.name}</Text>
+                        {!isLinked && (
+                            <TouchableOpacity onPress={openEditModal} style={styles.editIconBtn}>
+                                <Edit2 size={16} color={colors.primary} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                    <View style={{ height: 8 }} />
 
                     {isLinked && (
                         <View style={[styles.linkedBadge, { backgroundColor: colors.primary + '20' }]}>
@@ -270,6 +337,64 @@ export default function FriendDetailsScreen() {
 
                 <View style={{ height: 40 }} />
             </ScrollView>
+
+            {/* Edit Profile Modal */}
+            <Modal
+                visible={isEditing}
+                transparent={true}
+                animationType="slide"
+            >
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
+                    <View style={[styles.modalContent, { backgroundColor: colors.background }]}>
+                        <View style={styles.modalHeader}>
+                            <TouchableOpacity onPress={() => setIsEditing(false)} style={styles.modalCloseBtn}>
+                                <X size={24} color={colors.text} />
+                            </TouchableOpacity>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Profile</Text>
+                            <View style={{ width: 24 }} />
+                        </View>
+
+                        <ScrollView contentContainerStyle={styles.modalBody} keyboardShouldPersistTaps="handled">
+                            <View style={{ alignItems: 'center', marginBottom: 24 }}>
+                                <TouchableOpacity onPress={handlePickImage} activeOpacity={0.8} style={styles.editAvatarPicker}>
+                                    <InitialsAvatar
+                                        name={editName || friend.name}
+                                        avatarUrl={editAvatarUrl}
+                                        size={96}
+                                        isLocal={!isLinked}
+                                    />
+                                    <View style={[styles.cameraBadge, { backgroundColor: colors.primary }]}>
+                                        <Camera size={16} color="#FFF" />
+                                    </View>
+                                </TouchableOpacity>
+                                <Text style={[styles.editAvatarHint, { color: colors.textSecondary }]}>Tap to change photo</Text>
+                            </View>
+
+                            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Name</Text>
+                            <TextInput
+                                style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]}
+                                value={editName}
+                                onChangeText={setEditName}
+                                placeholder="Friend's Name"
+                                placeholderTextColor={colors.textSecondary}
+                                returnKeyType="done"
+                                onSubmitEditing={handleSaveProfile}
+                            />
+
+                            <TouchableOpacity
+                                style={[styles.saveButton, { backgroundColor: colors.primary, opacity: isSaving ? 0.7 : 1 }]}
+                                onPress={handleSaveProfile}
+                                disabled={isSaving}
+                            >
+                                <Text style={styles.saveButtonText}>{isSaving ? 'Saving...' : 'Save Changes'}</Text>
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -298,6 +423,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 16,
+    },
+    avatarEditContainer: {
+        marginBottom: 16,
+        position: 'relative',
+    },
+    editIconBtn: {
+        padding: 4,
     },
     avatarImage: { width: '100%', height: '100%' },
     friendName: {
@@ -421,6 +553,74 @@ const styles = StyleSheet.create({
     },
     deleteButtonText: {
         fontSize: 15,
+        fontWeight: '600',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        paddingHorizontal: 20,
+    },
+    modalContent: {
+        borderRadius: 24,
+        paddingBottom: 24,
+        overflow: 'hidden',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: 'rgba(150,150,150,0.2)',
+    },
+    modalCloseBtn: { padding: 4 },
+    modalTitle: { fontSize: 18, fontWeight: '700' },
+    modalBody: { padding: 24 },
+    editAvatarPicker: {
+        position: 'relative',
+        marginBottom: 12,
+    },
+    cameraBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: '#FFF',
+    },
+    editAvatarHint: {
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    inputLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        marginBottom: 8,
+        marginLeft: 4,
+    },
+    input: {
+        height: 52,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        fontSize: 16,
+        marginBottom: 24,
+    },
+    saveButton: {
+        height: 52,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    saveButtonText: {
+        color: '#FFF',
+        fontSize: 16,
         fontWeight: '600',
     },
 });

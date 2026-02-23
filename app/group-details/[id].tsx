@@ -125,6 +125,7 @@ export default function GroupDetailsScreen() {
                                     name={getMemberName(mId)}
                                     avatarUrl={friends.find(f => f.id === mId)?.avatarUrl}
                                     size={32}
+                                    isLocal={!friends.find(f => f.id === mId)?.linkedUserId}
                                 />
                                 <View style={{ width: 10 }} />
                                 <Text style={[styles.contributionName, { color: colors.text }]}>{getMemberName(mId)}</Text>
@@ -159,6 +160,7 @@ export default function GroupDetailsScreen() {
                                     name={getMemberName(mId)}
                                     avatarUrl={friends.find(f => f.id === mId)?.avatarUrl}
                                     size={48}
+                                    isLocal={!friends.find(f => f.id === mId)?.linkedUserId}
                                 />
                             </View>
                             <Text style={[styles.memberName, { color: colors.text }]}>{getMemberName(mId)}</Text>

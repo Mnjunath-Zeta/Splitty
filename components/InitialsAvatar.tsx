@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
+import { Star } from 'lucide-react-native';
+import { Colors } from '../constants/Colors';
 
 // Deterministic color from name — same name always gets same color
 const AVATAR_COLORS = [
@@ -27,6 +29,7 @@ interface InitialsAvatarProps {
     avatarUrl?: string;
     size?: number;
     fontSize?: number;
+    isLocal?: boolean;
 }
 
 export const InitialsAvatar: React.FC<InitialsAvatarProps> = ({
@@ -34,33 +37,63 @@ export const InitialsAvatar: React.FC<InitialsAvatarProps> = ({
     avatarUrl,
     size = 44,
     fontSize,
+    isLocal = false,
 }) => {
     const bgColor = getColorForName(name);
     const initials = getInitials(name);
     const computedFontSize = fontSize ?? Math.round(size * 0.36);
 
+    const renderBadge = () => {
+        if (!isLocal) return null;
+        const badgeSize = size * 0.35;
+        return (
+            <View style={[
+                styles.localBadge,
+                {
+                    width: badgeSize,
+                    height: badgeSize,
+                    borderRadius: badgeSize / 2,
+                    bottom: -2,
+                    right: -2,
+                    borderColor: '#FFFFFF', // Use white border for the cut-out effect
+                }
+            ]}>
+                <Star size={badgeSize * 0.65} color="#FFFFFF" fill="#FFFFFF" />
+            </View>
+        );
+    };
+
     if (avatarUrl) {
         return (
-            <Image
-                source={{ uri: avatarUrl }}
-                style={[styles.base, { width: size, height: size, borderRadius: size / 2 }]}
-            />
+            <View style={styles.container}>
+                <Image
+                    source={{ uri: avatarUrl }}
+                    style={[styles.base, { width: size, height: size, borderRadius: size / 2 }]}
+                />
+                {renderBadge()}
+            </View>
         );
     }
 
     return (
-        <View style={[
-            styles.base,
-            { width: size, height: size, borderRadius: size / 2, backgroundColor: bgColor }
-        ]}>
-            <Text style={[styles.initials, { fontSize: computedFontSize }]}>
-                {initials}
-            </Text>
+        <View style={styles.container}>
+            <View style={[
+                styles.base,
+                { width: size, height: size, borderRadius: size / 2, backgroundColor: bgColor }
+            ]}>
+                <Text style={[styles.initials, { fontSize: computedFontSize }]}>
+                    {initials}
+                </Text>
+            </View>
+            {renderBadge()}
         </View>
     );
 };
 
 const styles = StyleSheet.create({
+    container: {
+        position: 'relative',
+    },
     base: {
         alignItems: 'center',
         justifyContent: 'center',
@@ -70,5 +103,12 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontWeight: '700',
         letterSpacing: 0.5,
+    },
+    localBadge: {
+        position: 'absolute',
+        backgroundColor: '#F59E0B', // Amber 500 for the star background
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
     },
 });

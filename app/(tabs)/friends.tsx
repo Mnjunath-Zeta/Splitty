@@ -149,7 +149,7 @@ export default function FriendsScreen() {
                 <View style={styles.listContainer}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Friends</Text>
                     <FlatList
-                        data={friends.filter(f => !!f.linkedUserId)}
+                        data={friends}
                         keyExtractor={(item) => item.id}
                         renderItem={({ item }) => (
                             <TouchableOpacity
@@ -163,6 +163,7 @@ export default function FriendsScreen() {
                                             name={item.name}
                                             avatarUrl={item.avatarUrl}
                                             size={44}
+                                            isLocal={!item.linkedUserId}
                                         />
                                     </View>
                                     <View style={styles.friendInfo}>
