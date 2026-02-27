@@ -8,7 +8,7 @@ import { useSplittyStore, ActivityLog } from '../store/useSplittyStore';
 import { GlassCard } from '../components/GlassCard';
 
 export default function ActivityLogScreen() {
-    const { colors, isDarkMode, activities, fetchData, formatCurrency } = useSplittyStore();
+    const { colors, isDarkMode, activities, expenses, fetchData, formatCurrency } = useSplittyStore();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const [refreshing, setRefreshing] = useState(false);
@@ -16,6 +16,14 @@ export default function ActivityLogScreen() {
     useEffect(() => {
         fetchData();
     }, []);
+
+    const filteredActivities = activities.filter(activity => {
+        if (activity.entity_type === 'expense') {
+            const expense = expenses.find(e => e.id === activity.entity_id);
+            if (expense?.isPersonal) return false;
+        }
+        return true;
+    });
 
     const handleRefresh = async () => {
         setRefreshing(true);
@@ -163,7 +171,7 @@ export default function ActivityLogScreen() {
             </View>
 
             <FlatList
-                data={activities}
+                data={filteredActivities}
                 renderItem={renderItem}
                 keyExtractor={item => item.id}
                 contentContainerStyle={styles.listContent}

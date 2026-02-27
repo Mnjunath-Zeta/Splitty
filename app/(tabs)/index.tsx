@@ -22,6 +22,7 @@ export default function DashboardScreen() {
 
     // Filter and Sort Expenses for Recent Activity
     const recentExpenses = [...expenses]
+        .filter(e => !e.isPersonal)
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         .slice(0, 5);
 

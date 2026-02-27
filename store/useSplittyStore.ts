@@ -66,6 +66,7 @@ export interface Expense {
     category: string;
     isSettlement?: boolean;
     createdBy?: string;
+    isPersonal?: boolean;
 }
 
 export interface MonthlyBudget {
@@ -441,6 +442,7 @@ export const useSplittyStore = create<SplittyState>()(
                             splitDetails: localSplitDetails,
                             category: e.category,
                             isSettlement: e.is_settlement,
+                            isPersonal: e.is_personal,
                             createdBy: e.created_by
                         };
                     });
@@ -510,15 +512,34 @@ export const useSplittyStore = create<SplittyState>()(
                     }
                 }
 
+                // 5.8: Sanitize Categories (Remove non-serializable React components from old states)
+                let currentCategories = get().categories;
+                let categoriesModified = false;
+
+                const sanitizedCategories = currentCategories.map(cat => {
+                    if (typeof cat.icon !== 'string') {
+                        categoriesModified = true;
+                        console.warn(`🧹 Sanitizing corrupted category icon for: ${cat.label}`);
+                        return { ...cat, icon: 'MoreHorizontal' }; // Safe string fallback
+                    }
+                    return cat;
+                });
+
                 // 6. Set Final State
-                set({
+                const finalStateToSet: Partial<SplittyState> = {
                     userProfile,
                     friends: balancedFriends,
                     groups: balancedGroups,
                     expenses: loadedExpenses,
                     activities: (activitiesRes as any)?.data || [],
                     unknownFriendNames: newUnknownFriendNames
-                });
+                };
+
+                if (categoriesModified) {
+                    finalStateToSet.categories = sanitizedCategories;
+                }
+
+                set(finalStateToSet);
             },
             friends: [
                 { id: '1', name: 'Alwyn', balance: 450 },
@@ -736,7 +757,8 @@ export const useSplittyStore = create<SplittyState>()(
                         id,
                         date: oldExpense.date,
                         splitType: updatedExpense.splitType || 'equal',
-                        splitDetails: updatedExpense.splitDetails || {}
+                        splitDetails: updatedExpense.splitDetails || {},
+                        isPersonal: updatedExpense.isPersonal
                     };
 
                     if (session?.user) {
@@ -758,7 +780,8 @@ export const useSplittyStore = create<SplittyState>()(
                             category: newExpenseFull.category,
                             split_type: newExpenseFull.splitType,
                             split_details: realSplitDetails,
-                            split_with: realSplitWith
+                            split_with: realSplitWith,
+                            is_personal: newExpenseFull.isPersonal
                         })
                             .eq('id', id)
                             .then(async ({ error }) => {
@@ -941,6 +964,7 @@ export const useSplittyStore = create<SplittyState>()(
                         date: new Date().toISOString(),
                         splitType: expense.splitType || 'equal',
                         splitDetails: expense.splitDetails || {},
+                        isPersonal: expense.isPersonal,
                         payerName: 'Someone' // Placeholder, will update below
                     };
 
@@ -982,6 +1006,7 @@ export const useSplittyStore = create<SplittyState>()(
                             split_type: newExpense.splitType,
                             split_details: realSplitDetails,
                             split_with: realSplitWith, // Persist real UUIDs
+                            is_personal: newExpense.isPersonal,
                             created_by: session.user.id
                         }).then(async ({ error }) => {
                             if (error) {

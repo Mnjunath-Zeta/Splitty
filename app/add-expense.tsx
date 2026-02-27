@@ -5,7 +5,7 @@ import { GlassCard } from '../components/GlassCard';
 import { StyledInput } from '../components/StyledInput';
 import { VibrantButton } from '../components/VibrantButton';
 import { useSplittyStore } from '../store/useSplittyStore';
-import { ChevronRight, Users, Landmark, Check, Plus, Minus, Repeat, X, Edit2 } from 'lucide-react-native';
+import { ChevronRight, Users, Landmark, Check, Plus, Minus, Repeat, X, Edit2, User } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { Frequency } from '../store/useSplittyStore';
 
@@ -26,7 +26,7 @@ export default function AddExpenseScreen() {
     const [description, setDescription] = useState('');
     const [amount, setAmount] = useState('');
     const [category, setCategory] = useState<string>('general');
-    const [type, setType] = useState<'individual' | 'group'>('individual');
+    const [type, setType] = useState<'individual' | 'group' | 'personal'>('individual');
 
     // Changed to Array for Multi-Select
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -41,6 +41,7 @@ export default function AddExpenseScreen() {
 
     // Determine participants
     const getParticipants = () => {
+        if (type === 'personal') return ['self'];
         if (selectedIds.length === 0) return ['self'];
 
         if (type === 'individual') {
@@ -83,7 +84,10 @@ export default function AddExpenseScreen() {
                 setCategory(validCategory);
                 setSplitType(expense.splitType || 'equal');
 
-                if (expense.groupId) {
+                if (expense.isPersonal) {
+                    setType('personal');
+                    setSelectedIds([]);
+                } else if (expense.groupId) {
                     setType('group');
                     setSelectedIds([expense.groupId]);
                 } else if (expense.splitWith && expense.splitWith.length > 0) {
@@ -107,7 +111,7 @@ export default function AddExpenseScreen() {
     }, [id, expenses, categories]);
 
     // Reset logic when switching tabs
-    const handleTypeChange = (newType: 'individual' | 'group') => {
+    const handleTypeChange = (newType: 'individual' | 'group' | 'personal') => {
         setType(newType);
         setSelectedIds([]);
         setPayerId('self');
@@ -115,8 +119,12 @@ export default function AddExpenseScreen() {
     };
 
     const handleSave = () => {
-        if (!description || !amount || selectedIds.length === 0) {
-            Alert.alert('Error', 'Please fill in details and select at least one friend/group');
+        if (!description || !amount) {
+            Alert.alert('Error', 'Please enter a description and amount');
+            return;
+        }
+        if (type !== 'personal' && selectedIds.length === 0) {
+            Alert.alert('Error', 'Please select at least one friend/group for the split');
             return;
         }
 
@@ -155,7 +163,8 @@ export default function AddExpenseScreen() {
             groupId: type === 'group' ? selectedIds[0] : undefined,
             splitWith: type === 'individual' ? selectedIds : [],
             splitType,
-            splitDetails: splitType === 'unequal' ? splitDetails : undefined
+            splitDetails: splitType === 'unequal' ? splitDetails : undefined,
+            isPersonal: type === 'personal'
         };
 
         if (id) {
@@ -251,16 +260,26 @@ export default function AddExpenseScreen() {
                         <Users size={20} color={type === 'group' ? 'white' : colors.textSecondary} />
                         <Text style={[styles.tabText, { color: type === 'group' ? 'white' : colors.textSecondary }]}>Groups</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.tab, type === 'personal' && { backgroundColor: colors.primary }, !isEditing && { opacity: 0.7 }]}
+                        onPress={() => handleTypeChange('personal')}
+                        disabled={!isEditing}
+                    >
+                        <User size={20} color={type === 'personal' ? 'white' : colors.textSecondary} />
+                        <Text style={[styles.tabText, { color: type === 'personal' ? 'white' : colors.textSecondary }]}>Personal</Text>
+                    </TouchableOpacity>
                 </View>
 
-                <FriendSelector
-                    type={type}
-                    friends={friends}
-                    groups={groups}
-                    selectedIds={selectedIds}
-                    onToggle={toggleSelection}
-                    disabled={!isEditing}
-                />
+                {type !== 'personal' && (
+                    <FriendSelector
+                        type={type}
+                        friends={friends}
+                        groups={groups}
+                        selectedIds={selectedIds}
+                        onToggle={toggleSelection}
+                        disabled={!isEditing}
+                    />
+                )}
 
 
 
@@ -294,7 +313,7 @@ export default function AddExpenseScreen() {
                 </View>
 
                 {
-                    selectedIds.length > 0 && (
+                    selectedIds.length > 0 && type !== 'personal' && (
                         <SplitDetails
                             participants={participants}
                             payerId={payerId}
